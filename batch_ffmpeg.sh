@@ -23,14 +23,14 @@ progress_bar() {
     local width=$(tput cols)
     local cols=$(( width - 16 ))
     local percentage=$(printf "%3d" "$1")
-    local eqs=$(( cols * percentage / 100 ))
-    local blanks=$(( cols - eqs - 1 ))
+    local equals=$(( cols * percentage / 100 ))
+    local blanks=$(( cols - equals - 1 ))
 
     elapsed_time=$(date -d@$(( $(date +%s) - start )) -u '+%H:%M:%S')
 
     local progress_bar="$elapsed_time ["
-    (( eqs > 0 )) && progress_bar+=$(printf "=%.0s" $(seq "$eqs"))
-    (( eqs < cols )) && progress_bar+=">"
+    (( equals > 0 )) && progress_bar+=$(printf "=%.0s" $(seq "$equals"))
+    (( equals < cols )) && progress_bar+=">"
     (( blanks > 0 )) && progress_bar+=$(printf " %.0s" $(seq "$blanks"))
     progress_bar+="] $percentage%"
 
