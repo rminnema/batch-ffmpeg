@@ -14,8 +14,6 @@ blank_row() {
 # for example:
 # 00:23:45 [=======================================>]  99%
 progress_bar() {
-    trap 'exit' TERM
-
     if (( percentage < 0 || percentage > 100 )); then
         return 1
     fi
