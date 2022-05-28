@@ -1,7 +1,5 @@
 #!/bin/bash
 
-#set -eo pipefail
-
 # Clears the current row of text
 blank_row() {
     local blank_string=''
