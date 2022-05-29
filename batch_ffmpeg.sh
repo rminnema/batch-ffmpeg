@@ -395,6 +395,10 @@ else
     esac
 fi
 
+if [[ "$hdr_sdr_convert" ]]; then
+    video_filter="zscale=transfer=linear,tonemap=hable,zscale=transfer=bt709,format=$pix_fmt"
+fi
+
 echo "File format: ${file_format^^}"
 
 echo "Codec: $video_codec"
@@ -489,7 +493,7 @@ for video_file in "${video_files[@]}"; do
         -profile:v "$profile" \
         ${crf:+-crf "$crf"} \
         -preset "$preset" \
-        ${hdr_sdr_convert:+-vf "zscale=transfer=linear,tonemap=hable,zscale=transfer=bt709,format=$pix_fmt"} \
+        ${video_filter:+- vf "$video_filter"} \
         "${stream_codecs[@]}" \
         "${mapping[@]}" \
         "$w_output" &
