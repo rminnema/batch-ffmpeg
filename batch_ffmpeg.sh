@@ -236,6 +236,8 @@ print_result() {
     else
         echo
         echo "Error: encode failed or canceled after $(seconds_to_HMS "$duration") at $(date "+%I:%M:%S %p")"
+        echo "The reason given was:"
+        tail -n 3 "$ffmpeg_progress"
         touch "$outputfile.failed_encode"
         if ! "$resume_on_failure"; then
             exit 1
@@ -264,7 +266,7 @@ while (( $# )); do
     shift
     case "$flag" in
         --help|-h)              usage ;;
-        --input|-i)             input+=( "$1" )    
+        --input|-i)             input+=( "$1" )
                                 shift
                                 ;;
         --output|-o)            user_outputdir="$1"
@@ -273,12 +275,12 @@ while (( $# )); do
         --vcodec)               video_codec="$1"
                                 shift
                                 ;;
-        --plex-defaults)        crf=22
+        --plex-defaults|--plex) crf=22
                                 preset=slow
                                 copysubs=true
                                 video_codec=x265
                                 ;;
-        --ps5-defaults)         crf=22
+        --ps5-defaults|--ps5)   crf=22
                                 preset=slow
                                 file_format=mp4
                                 video_codec=x264
@@ -291,7 +293,7 @@ while (( $# )); do
         --format|-f)            file_format=$1
                                 shift
                                 ;;
-        --crf|-c)               crf=$(sed 's/[^0-9]//g' <<< "$1")    
+        --crf|-c)               crf=$(sed 's/[^0-9]//g' <<< "$1")
                                 shift
                                 ;;
         --preset|-p)            preset="$1"
@@ -491,18 +493,20 @@ for video_file in "${video_files[@]}"; do
     w_outputdir=$(wslpath -w "$outputdir")
     w_output="$w_outputdir\\$(sed "s/\\..*$/\\.$file_format/" <<< "$videoname")"
     start=$(date +%s)
-    ffmpeg_wrapper \
-        -nostdin \
-        $overwrite_flag \
-        -i "$w_video_file" \
-        -c:v "$video_codec" \
-        -profile:v "$profile" \
-        ${crf:+-crf "$crf"} \
-        -preset "$preset" \
-        ${video_filter:+- vf "$video_filter"} \
-        "${stream_codecs[@]}" \
-        "${mapping[@]}" \
-        "$w_output" &
+    ffmpeg_opts=(
+        -nostdin
+        $overwrite_flag
+        -i "$w_video_file"
+        -c:v "$video_codec"
+        -profile:v "$profile"
+        ${crf:+-crf "$crf"}
+        -preset "$preset"
+        ${video_filter:+-vf "$video_filter"}
+        "${stream_codecs[@]}"
+        "${mapping[@]}"
+        "$w_output"
+    )
+    ffmpeg_wrapper "${ffmpeg_opts[@]}" &
     trap int_hook INT
     ffmpeg_pid=$!
     echo "Encoding $videoname"
