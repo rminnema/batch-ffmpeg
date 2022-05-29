@@ -15,11 +15,12 @@ blank_row() {
 # Prints a progress bar that extends the entire bottom row
 # for example:
 # 00:23:45 [=======================================>]  99%
-progress_bar() {
+display_progress_bar() {
     if (( percentage < 0 || percentage > 100 )); then
         return 1
     fi
 
+    # Get the width of the terminal window
     local window_width=$(tput cols)
     local bar_width=$(( window_width - 16 ))
     local percentage=$(printf "%3d" "$1")
@@ -39,15 +40,16 @@ progress_bar() {
     echo -en "$progress_bar\r"
 }
 
-# Calculates and shows the progress of the encoding job
-show_progress() {
+# Calculates and shows the progress of the encoding job in seconds
+calculate_progress() {
     local progressline=$(tail -n 1 "$ffmpeg_progress" 2>/dev/null | awk -F '\r' '{ print $(NF - 1) }')
     if [[ "$progressline" ]]; then
         local progress=$(grep -Eo "[0-9]{2}:[0-9]{2}:[0-9]{2}" <<< "$progressline")
         local progress_s=$(awk -F ':' '{ print $1 * 3600 + $2 * 60 + $3 }' <<< "$progress")
-        local percentage=$(( 100 * progress_s / source_duration_s ))
-        progress_bar "$percentage"
+        echo "$progress_s"
+        return 0
     fi
+    return 1
 }
 
 # Waits for a background process to finish, but only until a specified timeout
@@ -55,10 +57,10 @@ timeout_wait() {
     local timeout=$1
     local pid=$2
 
-    local sleep_start=$(date +%s)
+    local wait_start=$(date +%s)
     while true; do
-        elapsed=$(( $(date +%s) - sleep_start ))
-        if ! kill -0 "$pid" || (( elapsed >= timeout )); then
+        local wait_elapsed=$(( $(date +%s) - sleep_start ))
+        if ! kill -0 "$pid" || (( wait_elapsed >= timeout )); then
             break
         fi
         sleep 1
@@ -67,7 +69,7 @@ timeout_wait() {
 
 # Actions to take when the program exits
 exit_hook() {
-    # This bit runs asynchronously (note the &) so that the terminal window is returned to the user
+    # This bit runs asynchronously (note the last &) so that the terminal window is returned to the user
     (
         rm -f "$ffmpeg_progress"
         if kill -0 "$ffmpeg_pid"; then
@@ -91,12 +93,25 @@ int_hook() {
     echo -e "\n$videoname will finish encoding and the program will exit."
     echo "Ctrl-C again to kill the encoding."
 
-    # Every half second, check if the ffmpeg process is finished and asynchronously update the progress bar
-    while sleep "$update_interval"; do
-        kill -0 "$ffmpeg_pid" &>/dev/null || break
-        show_progress &
+    # Every $update_interval seconds, check if the ffmpeg process is finished
+    # and asynchronously update the progress bar
+    if "$show_progress_bar"; then
+        while true; do
+            kill -0 "$ffmpeg_pid" &>/dev/null || break
+            if progress=$(calculate_progress); then
+                pct_progress=$(( 100 * progress / source_duration_s ))
+                display_progress_bar "$pct_progress"
+            fi
+            sleep "$update_interval"
+        done &
         bg_pids+=( "$!" )
-    done
+    fi
+
+    # Simultaneously, every second, check that the ffmpeg progress is done.
+    while sleep 1; do
+        kill -0 "$ffmpeg_pid" &>/dev/null || break
+    done &
+    wait "$!"
 
     # If the process is gone, get its exit status.
     # Otherwise we don't want to call wait otherwise it will actually wait
@@ -208,6 +223,10 @@ Options:
     --update-interval,-n    time in seconds (decimal allowed) between updates of the progress bar.
                             default: 1
 
+    --no-progress-bar       disable the progress bar
+
+    --draw-thumbnails       draw thumbnails as the encode progresses
+
 EOF
     exit 1
 }
@@ -223,10 +242,11 @@ print_result() {
         fi
     done &>/dev/null
     unset "bg_pids"
+    rm -f ~/encode_thumbnail.jpg
 
     # Successful encode
     if [[ "$ffmpeg_exit_status" == 0 && -f "$outputfile" ]]; then
-        progress_bar 100
+        display_progress_bar 100
         echo
         echo "Encoding finished successfully in $(seconds_to_HMS "$duration") at $(date "+%I:%M:%S %p")"
         if "$deletesource"; then
@@ -245,6 +265,15 @@ print_result() {
     fi
 }
 
+draw_thumbnail() {
+    if progress=$(calculate_progress); then
+        thumbnail=~/encode_thumbnail.jpg
+        ffmpeg -nostdin -i "$video_file" -vframes 1 -an -ss "$progress" ~/encode_thumbnail.jpg &>/dev/null
+        ascii-image-converter -Cc ~/encode_thumbnail.jpg
+        rm ~/encode_thumbnail.jpg
+    fi
+}
+
 user=$(whoami)
 if [[ "$user" == root ]]; then
     echo "You must run this job as a regular user."
@@ -258,6 +287,8 @@ overwrite=false
 rm_partial=false
 hwaccel=false
 resume_on_failure=false
+show_progress_bar=true
+draw_thumbnails=false
 
 # Parse user-provided options
 shopt -s nocasematch
@@ -299,7 +330,7 @@ while (( $# )); do
         --preset|-p)            preset="$1"
                                 shift
                                 ;;
-        --update-interval|-n)   update_interval=$(sed 's/[^0-9]//g' <<< "${1:-1}")
+        --update-interval|-n)   update_interval=$(sed 's/[^0-9]//g' <<< "$1")
                                 shift
                                 ;;
         --nocopysubs)           copysubs=false ;;
@@ -309,6 +340,8 @@ while (( $# )); do
         --hdr_sdr_convert)      hdr_sdr_convert=true ;;
         --resume_on_failure)    resume_on_failure=true ;;
         --hwaccel)              hwaccel=true ;;
+        --no-progress-bar)      show_progress_bar=false ;;
+        --draw-thumbnails)      draw_thumbnails=true ;;
         *)                      echo "Error: unrecognized flag '$flag'"
                             exit 1
                             ;;
@@ -407,6 +440,10 @@ if [[ "$hdr_sdr_convert" ]]; then
     video_filter="zscale=transfer=linear,tonemap=hable,zscale=transfer=bt709,format=$pix_fmt"
 fi
 
+if (( $(echo "$update_interval < 0.1" | bc -l) )); then
+    update_interval=0.1
+fi
+
 echo "File format: ${file_format^^}"
 
 echo "Codec: $video_codec"
@@ -493,6 +530,8 @@ for video_file in "${video_files[@]}"; do
     w_outputdir=$(wslpath -w "$outputdir")
     w_output="$w_outputdir\\$(sed "s/\\..*$/\\.$file_format/" <<< "$videoname")"
     start=$(date +%s)
+
+
     ffmpeg_opts=(
         -nostdin
         $overwrite_flag
@@ -507,14 +546,32 @@ for video_file in "${video_files[@]}"; do
         "$w_output"
     )
     ffmpeg_wrapper "${ffmpeg_opts[@]}" &
+
+
     trap int_hook INT
     ffmpeg_pid=$!
     echo "Encoding $videoname"
-    while sleep "$update_interval"; do
-        kill -0 "$ffmpeg_pid" &>/dev/null || break
-        show_progress &
+    if "$show_progress_bar"; then
+        while true; do
+            kill -0 "$ffmpeg_pid" &>/dev/null || break
+            if progress=$(calculate_progress); then
+                pct_progress=$(( 100 * progress / source_duration_s ))
+                display_progress_bar "$pct_progress"
+            fi
+            sleep "$update_interval"
+        done &
         bg_pids+=( "$!" )
-    done
+    fi
+    if "$draw_thumbnails"; then
+        while true; do
+            kill -0 "$ffmpeg_pid" &>/dev/null || break
+            draw_thumbnail
+        done &
+        bg_pids+=( "$!" )
+    fi
+    while sleep 1; do
+        kill -0 "$ffmpeg_pid" &>/dev/null || break
+    done &
     wait "$ffmpeg_pid"
     ffmpeg_exit_status=$?
     print_result
