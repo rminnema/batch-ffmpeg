@@ -92,7 +92,7 @@ int_hook() {
     echo "Ctrl-C again to kill the encoding."
 
     # Every half second, check if the ffmpeg process is finished and asynchronously update the progress bar
-    while sleep 0.5; do
+    while sleep "$update_interval"; do
         kill -0 "$ffmpeg_pid" &>/dev/null || break
         show_progress &
         bg_pids+=( "$!" )
@@ -199,11 +199,14 @@ Options:
     --rm-partial,-r         remove partial encodes
                             default: keep
 
-    --plex-defaults         set reasonable defaults for Plex Media Server
+    --plex-defaults,--plex  set reasonable defaults for Plex Media Server
                             h265, CRF 22, preset slow, copy subtitles
 
-    --ps5-defaults          set reasonable defaults for PS5 videos
+    --ps5-defaults,--ps5    set reasonable defaults for PS5 videos
                             h264, AAC, CRF 24, preset slow, tone mapping
+
+    --update-interval,-n    time in seconds (decimal allowed) between updates of the progress bar.
+                            default: 1
 
 EOF
     exit 1
@@ -292,6 +295,9 @@ while (( $# )); do
                                 shift
                                 ;;
         --preset|-p)            preset="$1"
+                                shift
+                                ;;
+        --update-interval|-n)   update_interval=$(sed 's/[^0-9]//g' <<< "${1:-1}")
                                 shift
                                 ;;
         --nocopysubs)           copysubs=false ;;
@@ -500,7 +506,7 @@ for video_file in "${video_files[@]}"; do
     trap int_hook INT
     ffmpeg_pid=$!
     echo "Encoding $videoname"
-    while sleep 0.5; do
+    while sleep "$update_interval"; do
         kill -0 "$ffmpeg_pid" &>/dev/null || break
         show_progress &
         bg_pids+=( "$!" )
