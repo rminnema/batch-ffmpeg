@@ -329,7 +329,7 @@ while (( $# )); do
         --preset|-p)            preset="$1"
                                 shift
                                 ;;
-        --update-interval|-n)   update_interval=$(sed 's/[^0-9]//g' <<< "$1")
+        --update-interval|-n)   update_interval=$(sed 's/[^0-9\.]//g' <<< "$1")
                                 shift
                                 ;;
         --nocopysubs)           copysubs=false ;;
