@@ -335,7 +335,7 @@ while (( $# )); do
         --nocopysubs)           copysubs=false ;;
         --deletesource)         deletesource=true ;;
         --overwrite|-w)         overwrite=true ;;
-        --keep-partial|-k)        rm_partial=false ;;
+        --keep-partial|-k)      rm_partial=false ;;
         --hdr_sdr_convert)      hdr_sdr_convert=true ;;
         --resume_on_failure)    resume_on_failure=true ;;
         --hwaccel)              hwaccel=true ;;
@@ -476,7 +476,13 @@ fi
 if "$deletesource"; then
     echo "Will delete the source file on a successful encode."
 else
-    echo "Will not delete the source file."
+    echo "Will keep the source file on a successful encode."
+fi
+
+if "$rm_partial"; then
+    echo "Will remove partially completed encodes."
+else
+    echo "Will keep partially completed encodes."
 fi
 
 if [[ "$hdr_sdr_convert" ]]; then
@@ -514,7 +520,8 @@ for video_file in "${video_files[@]}"; do
     fi
     mkdir -p "$outputdir"
     find "$outputdir" -name "*.failed_encode" -delete
-    outputfile="$outputdir/$(sed "s/\\..*$/\\.$file_format/" <<< "$videoname")"
+    output_videoname=$(sed "s/\\..*$/\\.$file_format/" <<< "$videoname")
+    outputfile="$outputdir/$output_videoname"
     if [[ "$outputfile" == "$video_file" ]]; then
         echo "Error: output and input file are the same!"
         echo "Cannot encode $videoname onto itself!"
