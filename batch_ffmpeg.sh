@@ -158,9 +158,8 @@ ffmpeg_wrapper() {
     trap '' INT
     trap 'kill "$!" &>/dev/null' TERM
 
-    # Windows ffmpeg.exe is more performant than WSL's version
-    # At least with WSL 1 operating on Windows files
-    ffmpeg.exe "$@" >/dev/null 2>"$ffmpeg_progress" &
+    # Now that I've switched to WSL2, I don't have to use the Windows exe anymore
+    ffmpeg "$@" >/dev/null 2>"$ffmpeg_progress" &
     wait "$!"
 }
 
@@ -173,7 +172,7 @@ Options:
     --help, -h              display this help text
 
     --input, -i             specify input files or directories (multiple -i flags allowed)
-                            default: /mnt/e/transcoding/source
+                            default: $HOME/transcoding/source
 
     --output, -o            specify output directory
                             default: Same as input, with source replaced with sink
@@ -211,8 +210,8 @@ Options:
     --overwrite,-w          overwrite previous encodes
                             default: don't clobber
 
-    --rm-partial,-r         remove partial encodes
-                            default: keep
+    --keep-partial,-r       keep partial encodes
+                            default: remove
 
     --plex-defaults,--plex  set reasonable defaults for Plex Media Server
                             h265, CRF 22, preset slow, copy subtitles
@@ -284,7 +283,7 @@ fi
 copysubs=true
 deletesource=false
 overwrite=false
-rm_partial=false
+rm_partial=true
 hwaccel=false
 resume_on_failure=false
 show_progress_bar=true
@@ -336,7 +335,7 @@ while (( $# )); do
         --nocopysubs)           copysubs=false ;;
         --deletesource)         deletesource=true ;;
         --overwrite|-w)         overwrite=true ;;
-        --rm-partial|-r)        rm_partial=true ;;
+        --keep-partial|-k)        rm_partial=false ;;
         --hdr_sdr_convert)      hdr_sdr_convert=true ;;
         --resume_on_failure)    resume_on_failure=true ;;
         --hwaccel)              hwaccel=true ;;
@@ -350,7 +349,7 @@ done
 shopt -u nocasematch
 
 if (( ${#input[@]} == 0 )); then
-    input=( '/mnt/e/transcoding/source' )
+    input=( "$HOME/transcoding/source" )
 fi
 
 for filepath in "${input[@]}"; do
@@ -440,6 +439,7 @@ if [[ "$hdr_sdr_convert" ]]; then
     video_filter="zscale=transfer=linear,tonemap=hable,zscale=transfer=bt709,format=$pix_fmt"
 fi
 
+update_interval=${update_interval:-1}
 if (( $(echo "$update_interval < 0.1" | bc -l) )); then
     update_interval=0.1
 fi
@@ -526,16 +526,13 @@ for video_file in "${video_files[@]}"; do
         echo
         continue
     fi
-    w_video_file=$(wslpath -w "$video_file")
-    w_outputdir=$(wslpath -w "$outputdir")
-    w_output="$w_outputdir\\$(sed "s/\\..*$/\\.$file_format/" <<< "$videoname")"
     start=$(date +%s)
 
 
     ffmpeg_opts=(
         -nostdin
         $overwrite_flag
-        -i "$w_video_file"
+        -i "$video_file"
         -c:v "$video_codec"
         -profile:v "$profile"
         ${crf:+-crf "$crf"}
@@ -543,7 +540,7 @@ for video_file in "${video_files[@]}"; do
         ${video_filter:+-vf "$video_filter"}
         "${stream_codecs[@]}"
         "${mapping[@]}"
-        "$w_output"
+        "$outputfile"
     )
     ffmpeg_wrapper "${ffmpeg_opts[@]}" &
 
