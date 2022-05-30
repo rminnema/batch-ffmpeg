@@ -158,8 +158,9 @@ ffmpeg_wrapper() {
     trap '' INT
     trap 'kill "$!" &>/dev/null' TERM
 
-    # Now that I've switched to WSL2, I don't have to use the Windows exe anymore
-    ffmpeg "$@" >/dev/null 2>"$ffmpeg_progress" &
+    # Performance is better on WSL1 with the Windows ffmpeg.exe than on WSL1 or WSL2 with ffmpeg on Linux native
+    # No idea why
+    ffmpeg.exe "$@" >/dev/null 2>"$ffmpeg_progress" &
     wait "$!"
 }
 
@@ -533,13 +534,15 @@ for video_file in "${video_files[@]}"; do
         echo
         continue
     fi
+    w_outputfile="$(wslpath -w "$outputdir")\\$output_videoname"
+    w_video_file=$(wslpath -w "$video_file")
     start=$(date +%s)
 
 
     ffmpeg_opts=(
         -nostdin
         $overwrite_flag
-        -i "$video_file"
+        -i "$w_video_file"
         -c:v "$video_codec"
         -profile:v "$profile"
         ${crf:+-crf "$crf"}
@@ -547,7 +550,7 @@ for video_file in "${video_files[@]}"; do
         ${video_filter:+-vf "$video_filter"}
         "${stream_codecs[@]}"
         "${mapping[@]}"
-        "$outputfile"
+        "$w_outputfile"
     )
     ffmpeg_wrapper "${ffmpeg_opts[@]}" &
 
