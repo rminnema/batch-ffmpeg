@@ -541,7 +541,7 @@ for video_file in "${video_files[@]}"; do
 
     ffmpeg_opts=(
         -nostdin
-        $overwrite_flag
+        "$overwrite_flag"
         -i "$w_video_file"
         -c:v "$video_codec"
         -profile:v "$profile"
