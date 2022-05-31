@@ -365,7 +365,7 @@ done
 crf=$(sed 's/[^0-9]//g' <<< "${crf:-24}")
 
 if (( crf < 0 || crf > 51 )); then
-    echo -n "Error: CRF given is out of range [0 - 51]. Setting to closest value: "
+    echo -n "Warning: CRF given is out of range [0 - 51]. Setting to closest value: "
     if (( crf < 0 )); then
         echo "0"
         crf=0
@@ -524,13 +524,13 @@ for video_file in "${video_files[@]}"; do
     output_videoname=$(sed "s/\\..*$/\\.$file_format/" <<< "$videoname")
     outputfile="$outputdir/$output_videoname"
     if [[ "$outputfile" == "$video_file" ]]; then
-        echo "Error: output and input file are the same!"
+        echo "Warning: output and input file are the same!"
         echo "Cannot encode $videoname onto itself!"
         echo
         continue
     fi
     if [[ -f "$outputfile" ]] && ! "$overwrite"; then
-        echo "Error: Output file $(basename "$outputfile") exists but overwrite flag was not given."
+        echo "Warning: Output file $(basename "$outputfile") exists but overwrite flag was not given."
         echo
         continue
     fi
