@@ -267,10 +267,10 @@ print_result() {
 
 draw_thumbnail() {
     if progress=$(calculate_progress); then
-        thumbnail=~/encode_thumbnail.jpg
-        ffmpeg -nostdin -i "$video_file" -vframes 1 -an -ss "$progress" ~/encode_thumbnail.jpg &>/dev/null
-        ascii-image-converter -Cc ~/encode_thumbnail.jpg
-        rm ~/encode_thumbnail.jpg
+        thumbnail="$HOME/encode_thumbnail.jpg"
+        ffmpeg.exe -nostdin -ss "$progress" -i "$w_video_file" -vframes 1 -an "$(wslpath -w "$thumbnail")" &>/dev/null
+        ascii-image-converter -Cc "$thumbnail"
+        rm -f "$thumbnail"
     fi
 }
 
