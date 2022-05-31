@@ -59,7 +59,7 @@ timeout_wait() {
 
     local wait_start=$(date +%s)
     while true; do
-        local wait_elapsed=$(( $(date +%s) - sleep_start ))
+        local wait_elapsed=$(( $(date +%s) - wait_start ))
         if ! kill -0 "$pid" || (( wait_elapsed >= timeout )); then
             break
         fi
