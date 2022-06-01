@@ -232,6 +232,27 @@ EOF
     exit 1
 }
 
+print_size() {
+    awk '
+        function human(x) {
+            if (x < 1000) {
+                return x
+            } else {
+                x/=1024
+            }
+            s="kMGTP"
+            while (x >= 1000 && length(s) > 1) {
+                x/=1024
+                s=substr(s,2)
+            }
+            return sprintf("%.2f",x) substr(s,1,1)
+        }
+        {
+            print human($0)
+        }
+    '
+}
+
 print_result() {
     local duration=$(( $(date +%s) - start ))
 
@@ -246,10 +267,26 @@ print_result() {
     rm -f ~/encode_thumbnail.jpg
 
     # Successful encode
-    if [[ "$ffmpeg_exit_status" == 0 && -f "$outputfile" ]]; then
+    if [[ "$ffmpeg_exit_status" == 0 && -s "$outputfile" ]]; then
         display_progress_bar 100
         echo
         echo "Encoding finished successfully in $(seconds_to_HMS "$duration") at $(date "+%I:%M:%S %p")"
+        input_size=$(stat -c '%s' "$video_file")
+        output_size=$(stat -c '%s' "$outputfile")
+        cr=$(awk -v i="$input_size" -v o="$output_size" 'BEGIN { printf "%.2f",i/o }')
+        echo "Input size: $(print_size <<< "$input_size")"
+        echo "Output size: $(print_size <<< "$output_size")"
+        echo "Compression ratio: $cr"
+        if (( $(awk -v cr="$cr" 'BEGIN { print cr <= 1 }') )); then
+            echo "Error: Low compression ratio!"
+            echo "Check settings!"
+            exit 1
+        elif (( $(awk -v cr="$cr" 'BEGIN { print cr > 10 }') )); then
+            echo "Error: Highly implausible compression ratio!"
+            echo "Check settings/code!"
+            exit 1
+        fi
+        echo
         if "$deletesource"; then
             rm -f "$video_file"
         fi
@@ -260,6 +297,9 @@ print_result() {
         echo "The reason given was:"
         tail -n 3 "$ffmpeg_progress"
         touch "$outputfile.failed_encode"
+        if ! "$keep_partial"; then
+            rm "$outputfile"
+        fi
         if ! "$resume_on_failure"; then
             exit 1
         fi
