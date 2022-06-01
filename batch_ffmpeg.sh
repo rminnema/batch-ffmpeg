@@ -264,7 +264,7 @@ print_result() {
         fi
     done &>/dev/null
     unset "bg_pids"
-    rm -f ~/encode_thumbnail.jpg
+    rm -f ~/encode_thumbnail.png
 
     # Successful encode
     if [[ "$ffmpeg_exit_status" == 0 && -s "$outputfile" ]]; then
@@ -308,8 +308,8 @@ print_result() {
 
 draw_thumbnail() {
     if progress=$(calculate_progress); then
-        thumbnail="$HOME/encode_thumbnail.jpg"
-        w_thumbnail="$(wslpath -w "$HOME")\\encode_thumbnail.jpg"
+        thumbnail="$HOME/encode_thumbnail.png"
+        w_thumbnail="$(wslpath -w "$HOME")\\encode_thumbnail.png"
         ffmpeg.exe -nostdin -ss "$progress" -i "$w_video_file" -vframes 1 -an "$w_thumbnail" &>/dev/null
         ascii-image-converter -Cc "$thumbnail"
         rm -f "$thumbnail"
