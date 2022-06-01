@@ -176,7 +176,8 @@ Options:
                             default: $HOME/transcoding/source
 
     --output, -o            specify output directory
-                            default: Same as input, with source replaced with sink
+                            default: Same directory as each input file, with "source"
+                                     replaced with "sink"
 
     --format,-f             specify file format MP4 or MKV
 
@@ -268,7 +269,8 @@ print_result() {
 draw_thumbnail() {
     if progress=$(calculate_progress); then
         thumbnail="$HOME/encode_thumbnail.jpg"
-        ffmpeg.exe -nostdin -ss "$progress" -i "$w_video_file" -vframes 1 -an "$(wslpath -w "$thumbnail")" &>/dev/null
+        w_thumbnail="$(wslpath -w "$HOME")\\encode_thumbnail.jpg"
+        ffmpeg.exe -nostdin -ss "$progress" -i "$w_video_file" -vframes 1 -an "$w_thumbnail" &>/dev/null
         ascii-image-converter -Cc "$thumbnail"
         rm -f "$thumbnail"
     fi
@@ -438,6 +440,8 @@ fi
 
 if [[ "$hdr_sdr_convert" ]]; then
     video_filter="zscale=transfer=linear,tonemap=hable,zscale=transfer=bt709,format=$pix_fmt"
+else
+    video_filter="format=$pix_fmt"
 fi
 
 update_interval=${update_interval:-1}
@@ -541,7 +545,7 @@ for video_file in "${video_files[@]}"; do
 
     ffmpeg_opts=(
         -nostdin
-        "$overwrite_flag"
+        $overwrite_flag
         -i "$w_video_file"
         -c:v "$video_codec"
         -profile:v "$profile"
