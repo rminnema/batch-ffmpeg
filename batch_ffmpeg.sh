@@ -93,20 +93,6 @@ int_hook() {
     echo -e "\n$videoname will finish encoding and the program will exit."
     echo "Ctrl-C again to kill the encoding."
 
-    # Every $update_interval seconds, check if the ffmpeg process is finished
-    # and asynchronously update the progress bar
-    if "$show_progress_bar"; then
-        while true; do
-            kill -0 "$ffmpeg_pid" &>/dev/null || break
-            if progress=$(calculate_progress); then
-                pct_progress=$(( 100 * progress / source_duration_s ))
-                display_progress_bar "$pct_progress"
-            fi
-            sleep "$update_interval"
-        done &
-        bg_pids+=( "$!" )
-    fi
-
     # Simultaneously, every second, check that the ffmpeg progress is done.
     while sleep 1; do
         kill -0 "$ffmpeg_pid" &>/dev/null || break
