@@ -1,7 +1,5 @@
 #!/bin/bash
 
-readonly TERM_WIDTH=$(tput cols)
-
 # Prints a progress bar that extends the entire bottom row
 # for example:
 # 00:23:45 [=======================================>]  99%
@@ -10,17 +8,17 @@ display_progress_bar() {
         return 1
     fi
 
-    local bar_width=$(( TERM_WIDTH - 16 ))
+    local bar_width=$(( $(tput cols) - 16 ))
     local percentage=$(printf "%3d" "$1")
     local equals_signs=$(( bar_width * percentage / 100 ))
     local spaces=$(( bar_width - equals_signs - 1 ))
 
     if (( ${BASH_VERSION::1} >= 5 )); then
-        elapsed_seconds=$(( EPOCHSECONDS - start ))
+        local elapsed_seconds=$(( EPOCHSECONDS - start ))
     else
-        elapsed_seconds=$(( $(date +%s) - start ))
+        local elapsed_seconds=$(( $(date +%s) - start ))
     fi
-    elapsed_time=$(seconds_to_HMS_colons "$elapsed_seconds")
+    local elapsed_time=$(seconds_to_HMS_colons "$elapsed_seconds")
 
     # Build the progress bar piece by piece
     local progress_bar="$elapsed_time ["
@@ -46,6 +44,7 @@ calculate_progress() {
 
 # Actions to take when the program exits
 exit_hook() {
+    kill "${bg_pids[@]}" &>/dev/null
     rm -f "$ffmpeg_progress"
     if [[ "$ffmpeg_exit_status" != 0 ]] && "$rm_partial"; then
         rm -f "$outputfile"
@@ -86,21 +85,13 @@ seconds_to_HMS_sentence() {
         sed -re 's/, $//' -e 's/#(1 [a-z]+)s/#\1/g' -e 's/#//g'
 }
 
-# Wrapper function to run ffmpeg asynchronously
-ffmpeg_wrapper() {
-    # Windows' ffmpeg.exe is much faster on WSL than the Linux binary
-    # I have no idea why
-    ffmpeg.exe "$@" >/dev/null 2>"$ffmpeg_progress" &
-    wait "$!"
-}
-
 usage() {
     cat <<EOF | less
 
 $0 [OPTIONS]
 
 Options:
-    --help, -h              display this help text
+    --help, -h, -?          display this help text
 
     --input, -i             specify input files or directories (multiple -i flags allowed)
                             default: $HOME/transcoding/source
@@ -191,13 +182,8 @@ print_result() {
         duration=$(( $(date +%s) - start ))
     fi
 
-    # Since the encoding has stopped, kill the asynchronous processes updating the progress bar
-    for i in "${!bg_pids[@]}"; do
-        pid=${bg_pids[$i]}
-        if kill -0 "$pid"; then
-            kill "$pid"
-        fi
-    done &>/dev/null
+    # Since the encoding has stopped, kill the asynchronous processes updating the progress bar or drawing thumbnails
+    kill "${bg_pids[@]}" &>/dev/null
     unset "bg_pids"
     rm -f ~/encode_thumbnail.png
 
@@ -270,7 +256,7 @@ while (( $# )); do
     flag=$1
     shift
     case "$flag" in
-        --help|-h)
+        --help|-h|-\?)
             usage ;;
         --input|-i)
             input+=( "$1" )
@@ -524,7 +510,6 @@ cancel_queue=false
 # Loop over every file in the directories provided by the user
 for video_file in "${video_files[@]}"; do
     "$cancel_queue" && exit 1
-    trap - INT
     declare -a bg_pids
     echo
     source_duration=$(mediainfo "$video_file" | awk -F ' +: +' '/^Duration/ { print $2 }' | head -n 1)
@@ -575,11 +560,12 @@ for video_file in "${video_files[@]}"; do
         "${mapping[@]}"
         "$w_outputfile"
     )
-    ffmpeg_wrapper "${ffmpeg_opts[@]}" &
-
-
+    ffmpeg.exe "${ffmpeg_opts[@]}" >/dev/null 2>"$ffmpeg_progress" &
     ffmpeg_pid=$!
+
+
     echo "Encoding $videoname"
+
     if "$show_progress_bar"; then
         while true; do
             kill -0 "$ffmpeg_pid" &>/dev/null || break
@@ -591,6 +577,7 @@ for video_file in "${video_files[@]}"; do
         done &
         bg_pids+=( "$!" )
     fi
+
     if "$draw_thumbnails"; then
         while true; do
             kill -0 "$ffmpeg_pid" &>/dev/null || break
@@ -598,16 +585,19 @@ for video_file in "${video_files[@]}"; do
         done &
         bg_pids+=( "$!" )
     fi
+
     echo "Press q to cancel the queue"
     while kill -0 "$ffmpeg_pid" &>/dev/null; do
-        if read -rsn 1 -t 0.2 letter < /dev/tty && [[ "${letter,,}" == q ]]; then
+        if read -rsn 1 -t 0.1 letter < /dev/tty && [[ $letter =~ Q|q ]]; then
             echo "The queue has been cancelled. Encode of $videoname will finish."
             echo "Ctrl-C to kill the encode."
             cancel_queue=true
             break
         fi
     done
+
     wait "$ffmpeg_pid"
     ffmpeg_exit_status=$?
+
     print_result
 done
