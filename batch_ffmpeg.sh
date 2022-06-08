@@ -26,9 +26,9 @@ display_progress_bar() {
     local spaces=$(( bar_width - equals_signs - 1 ))
 
     if (( ${BASH_VERSION::1} >= 5 )); then
-        local elapsed_seconds=$(( EPOCHSECONDS - start ))
+        local elapsed_seconds=$(( EPOCHSECONDS - encoding_start_time ))
     else
-        local elapsed_seconds=$(( $(date +%s) - start ))
+        local elapsed_seconds=$(( $(date +%s) - encoding_start_time ))
     fi
     local elapsed_hhmmss=$(seconds_to_hhmmss "$elapsed_seconds")
 
@@ -57,7 +57,7 @@ calculate_progress() {
 # Actions to take when the program exits
 exit_hook() {
     kill "${bg_pids[@]}" &>/dev/null
-    #rm -f "$ffmpeg_progress" "$thumbnail"
+    rm -f "$ffmpeg_progress" "$thumbnail"
     if [[ "$ffmpeg_exit_status" != 0 ]] && "$rm_partial"; then
         rm -f "$output_video"
     fi
@@ -65,22 +65,19 @@ exit_hook() {
 
 # Converts seconds to string in form of HH:MM:SS
 seconds_to_hhmmss() {
-    local tally_seconds=$1
-    local hours=$(( tally_seconds / 60 ** 2 ))
-    tally_seconds=$(( tally_seconds % 60 ** 2 ))
-    local minutes=$(( tally_seconds / 60 ))
-    local seconds=$(( tally_seconds % 60 ))
+    local hours=$(( $1 / 60 ** 2 ))
+    local minutes=$(( ($1 % 60 ** 2) / 60 ))
+    local seconds=$(( $1 % 60 ))
 
     printf "%02d:%02d:%02d\n" "$hours" "$minutes" "$seconds"
 }
 
 # Converts seconds to string in form of 'HH hours, MM minutes, SS seconds'
 seconds_to_english() {
-    local hhmmss=$(seconds_to_hhmmss "$1")
-    IFS=':' read -r hours minutes seconds <<< "$hhmmss"; IFS=$' \t\n'
-    local hours=$(cut -d : -f 1 <<< "$hhmmss" | sed -re 's/^0([0-9])//' -e 's/^0//')
-    local minutes=$(cut -d : -f 2 <<< "$hhmmss" | sed -re 's/^0([0-9])/\1/' -e 's/^0//')
-    local seconds=$(cut -d : -f 3 <<< "$hhmmss" | sed -r 's/^0([0-9])/\1/')
+    IFS=':' read -r hours minutes seconds < <(seconds_to_hhmmss "$1"); IFS=$' \t\n'
+    local hours=$(sed -re 's/^0([0-9])/\1/' -e 's/^0//' <<< "$hours")
+    local minutes=$(sed -re 's/^0([0-9])/\1/' -e 's/^0//' <<< "$minutes")
+    local seconds=$(sed -r 's/^0([0-9])/\1/' <<< "$seconds")
 
     echo "${hours:+#$hours hours, }${minutes:+#$minutes minutes, }${seconds:+#$seconds seconds}" |
         sed -re 's/, $//' -e 's/#(1 [a-z]+)s/#\1/g' -e 's/#//g'
@@ -113,10 +110,10 @@ Options:
 
     --crf, -c               set x264 or x265 constant rate factor
                             range: [0 - 51]
-                            default: 24
+                            default: 22
 
     --preset, -p            set x264 or x265 preset
-                            default: medium
+                            default: slow
 
     --hdr_sdr_convert       convert HDR source video to SDR
 
@@ -126,19 +123,19 @@ Options:
     --nosubs, --no-subs     do not copy subtitles from source file
                             default: copy
 
-    --resume_on_failure     exit on failure instead of continuing with the queue
+    --resume_on_failure     continue with the queue instead of exiting on failure
 
     --deletesource          delete the source file on successful encode
                             default: keep
 
     --overwrite,-w          overwrite previous encodes
-                            default: don't clobber
+                            default: don't overwrite
 
     --keep-partial,-r       keep partial encodes
                             default: remove
 
     --ps5-defaults,--ps5    set reasonable defaults for PS5 videos
-                            h264, AAC, CRF 24, preset slow, tone mapping
+                            h264, AAC, CRF 22, preset slow, HDR tone mapping
 
     --update-interval,-n    time in seconds (decimal allowed) between updates of the progress bar.
                             default: 1
@@ -147,12 +144,12 @@ Options:
 
     --draw-thumbnails       draw thumbnails as the encode progresses
 
-    --preview               instead of saving the encoded video, send it to VLC for previewing
+    --preview-only          do not save the output to a file, simply preview it in VLC
 
     --debug                 print debugging information (namely the parameters passed to ffmpeg)
 
 EOF
-    exit 1
+    die
 }
 
 print_size() {
@@ -179,9 +176,9 @@ print_size() {
 print_result() {
     local duration
     if (( ${BASH_VERSION::1} >= 5 )); then
-        duration=$(( EPOCHSECONDS - start ))
+        duration=$(( EPOCHSECONDS - encoding_start_time ))
     else
-        duration=$(( $(date +%s) - start ))
+        duration=$(( $(date +%s) - encoding_start_time ))
     fi
 
     # Since the encoding has stopped, kill the asynchronous processes updating the progress bar or drawing thumbnails
@@ -213,7 +210,7 @@ print_result() {
         echo
         echo "Encode cancelled after $(seconds_to_english "$duration") at $(date "+%I:%M:%S %p")"
         echo
-        exit 1
+        die
     # Failed encode
     else
         echo
@@ -227,19 +224,12 @@ print_result() {
         echo
         echo "Encoding options were:"
         echo
-        echo -n "$ffmpeg_path "
-        for opt in "${ffmpeg_opts[@]}"; do
-            if grep -Eq "\s" <<< "$opt"; then
-                echo -n "${opt@Q} "
-            else
-                echo -n "$opt "
-            fi
-        done | sed 's/ $//'
+        print_cmdline
         echo
         echo
         touch "$output_video.failed_encode"
         if ! "$resume_on_failure"; then
-            exit 1
+            die
         fi
         if "$rm_partial"; then
             rm "$output_video"
@@ -259,6 +249,18 @@ draw_thumbnail() {
         ascii-image-converter -Cc "$thumbnail"
         rm -f "$thumbnail"
     fi
+}
+
+print_cmdline() {
+    echo -n "$ffmpeg_path" | sed "s/^.*\s.*$/'&'/"
+    for opt in "${ffmpeg_opts[@]}"; do
+        if grep -Eq "\s" <<< "$opt"; then
+            echo -n " ${opt@Q}"
+        else
+            echo -n " $opt"
+        fi
+    done
+    echo
 }
 
 user=$(whoami)
@@ -293,8 +295,8 @@ hwaccel=false
 resume_on_failure=false
 show_progress_bar=true
 draw_thumbnails=false
-preview=false
 debugging=false
+preview_only=false
 
 # Parse user-provided options
 shopt -s nocasematch
@@ -364,11 +366,10 @@ while (( $# )); do
             draw_thumbnails=true ;;
         --debug)
             debugging=true ;;
-        --preview)
-            preview=true ;;
+        --preview-only)
+            preview_only=true ;;
         *)
-            echo "Error: unrecognized flag '$flag'"
-            exit 1
+            die "unrecognized flag '$flag'"
             ;;
     esac
 done
@@ -383,11 +384,11 @@ for filepath in "${input[@]}"; do
         echo "You must choose a path that we can read and write to."
         echo "Path given: '$filepath'"
         echo "ownership and permissions: $(stat -c '%U:%G %A' "$filepath")"
-        exit 1
+        die
     fi
 done
 
-crf=$(sed 's/[^0-9]//g' <<< "${crf:-24}")
+crf=$(sed 's/[^0-9]//g' <<< "$crf")
 
 if (( crf < 0 || crf > 51 )); then
     echo -n "Warning: CRF given is out of range [0 - 51]. Setting to closest value: "
@@ -440,7 +441,7 @@ case "${audio_codec,,}" in
         audio_codec=flac ;;
     *aac*)
         audio_codec=libfdk_aac
-        audio_vbr_mode=5
+        audio_bitrate=320k
         ;;
     *)
         audio_codec=copy ;;
@@ -456,7 +457,7 @@ if "$hwaccel"; then
         *)
             preset=medium ;;
     esac
-elif ! "$preview"; then
+elif ! "$preview_only"; then
     case "${preset,,}" in
         ultrafast)
             preset=${preset,,} ;;
@@ -492,7 +493,7 @@ if (( $(echo "$update_interval < 0.1" | bc -l) )); then
     update_interval=0.1
 fi
 
-echo "File format: ${file_format^^}"
+"$preview_only" || echo "File format: ${file_format^^}"
 
 echo "Codec: $video_codec"
 
@@ -514,23 +515,25 @@ else
     echo "Will not copy subtitles"
 fi
 
-if "$overwrite"; then
-    echo "Will overwrite previous encodes"
-    overwrite_flag='-y'
-else
-    echo "Will not overwrite previous encodes"
-fi
-
-if "$deletesource"; then
-    echo "Will delete the source file on a successful encode."
-else
-    echo "Will keep the source file on a successful encode."
-fi
-
-if "$rm_partial"; then
-    echo "Will remove partially completed encodes."
-else
-    echo "Will keep partially completed encodes."
+if ! "$preview_only"; then
+    if "$overwrite"; then
+        echo "Will overwrite previous encodes"
+        overwrite_flag='-y'
+    else
+        echo "Will not overwrite previous encodes"
+    fi
+    
+    if "$deletesource"; then
+        echo "Will delete the source file on a successful encode."
+    else
+        echo "Will keep the source file on a successful encode."
+    fi
+    
+    if "$rm_partial"; then
+        echo "Will remove partially completed encodes."
+    else
+        echo "Will keep partially completed encodes."
+    fi
 fi
 
 if [[ "$hdr_sdr_convert" ]]; then
@@ -547,7 +550,8 @@ mapfile -t input_videos < <(find "${input[@]}" -type f -iregex '.*\.\(mp4\|mkv\|
 total_size=$(du -bch "${input_videos[@]}" | tail -n 1 | awk '{ print $1 }')
 
 echo "Encoding ${#input_videos[@]} videos totaling $total_size in ${input[*]}"
-echo "Press Q to cancel the queue at any time."
+echo "Press Q to cancel the queue at any time"
+"$preview_only" || echo "Press P to preview the current video encoding."
 
 trap exit_hook EXIT
 
@@ -558,8 +562,8 @@ polling_interval=0.005
 
 # Loop over every file in the directories provided by the user
 for input_video in "${input_videos[@]}"; do
-    if [[ "$letter1" =~ Q|q ]]; then
-        exit 1
+    if [[ "$signal1" =~ Q|q ]]; then
+        die
     fi
 
     echo
@@ -580,13 +584,13 @@ for input_video in "${input_videos[@]}"; do
     mkdir -p "$outputdir" || die
     rm -f "$output_video.failed_encode"
 
-    if [[ "$output_video" == "$input_video" ]]; then
+    if [[ "$output_video" == "$input_video" ]] && ! "$preview_only"; then
         echo "Warning: output and input file are the same. Skipping."
         echo
         continue
     fi
 
-    if [[ -f "$output_video" ]] && ! "$overwrite" && ! "$preview"; then
+    if [[ -f "$output_video" ]] && ! "$overwrite" && ! "$preview_only"; then
         echo "Warning: Output file $(basename "$output_video") exists but overwrite flag was not given. Skipping."
         echo
         continue
@@ -600,7 +604,7 @@ for input_video in "${input_videos[@]}"; do
         ffmpeg_output=$output_video
     fi
 
-    if "$preview"; then
+    if "$preview_only"; then
         container_format=matroska
         ffmpeg_output='-'
     fi
@@ -618,47 +622,38 @@ for input_video in "${input_videos[@]}"; do
         ${pix_fmt:+-pix_fmt "$pix_fmt"}
         ${video_filter:+-vf "$video_filter"}
         "${stream_codecs[@]}"
-        ${audio_vbr_mode:+-vbr "$audio_vbr_mode"}
+        ${audio_bitrate:+-b:a "$audio_bitrate"}
         "${mapping[@]}"
         ${container_format:+-f "$container_format"}
         ${ffmpeg_output:+"$ffmpeg_output"}
     )
 
     if (( "${BASH_VERSION::1}" >= 5 )); then
-        start=$EPOCHSECONDS
+        encoding_start_time=$EPOCHSECONDS
     else
-        start=$(date +%s)
+        encodeing_start_time=$(date +%s)
     fi
-
     echo "Encoding $videoname"
     if "$debugging"; then
-        echo -n "${ffmpeg_path}" | sed "s/^.*\s.*$/'&'/"
-        for opt in "${ffmpeg_opts[@]}"; do
-            if grep -Eq "\s" <<< "$opt"; then
-                echo -n " ${opt@Q}"
-            else
-                echo -n " $opt"
-            fi
-        done
-        if "$preview"; then
-            echo " 2>${ffmpeg_progress@Q} | ${vlc_path@Q} - &>/dev/null &"
-        else
-            echo " >/dev/null 2>'$ffmpeg_progress' &"
-        fi
-        echo "ffmpeg PID: $ffmpeg_pid"
-        echo
+        print_cmdline
     fi
 
 
     # Start the encoding task
-    if "$preview"; then
+    if "$preview_only"; then
         "$ffmpeg_path" "${ffmpeg_opts[@]}" 2>"$ffmpeg_progress" | "$vlc_path" - &>/dev/null &
+        ffmpeg_pid=$!
     else
         "$ffmpeg_path" "${ffmpeg_opts[@]}" >/dev/null 2>"$ffmpeg_progress" &
+        ffmpeg_pid=$!
     fi
-    ffmpeg_pid=$!
 
 
+    if "$debugging"; then
+        echo "ffmpeg PID: '$ffmpeg_pid'"
+        echo "progress file: '$ffmpeg_progress'"
+        echo
+    fi
 
     bg_pids=()
 
@@ -685,31 +680,35 @@ for input_video in "${input_videos[@]}"; do
 
     # Poll for the cancellation signal.
     while kill -0 "$ffmpeg_pid" &>/dev/null; do
-        if read -rsn 1 -t "$polling_interval" letter1 < /dev/tty && [[ $letter1 =~ Q|q ]]; then
+        if read -rsn 1 -t "$polling_interval" signal1 < /dev/tty && [[ $signal1 =~ Q|q ]]; then
             echo
             echo "The queue has been cancelled."
             echo "$videoname will finish encoding."
             echo "Press Q again to cancel encoding."
             echo
             break
+        elif [[ $signal1 =~ P|p ]] && ! "$preview_only"; then
+            "$vlc_path" "$ffmpeg_output" &>/dev/null &
         fi
     done
 
     # If the queue has been cancelled, the encode is probably still running.
     # If it is, poll for another cancellation signal.
     while kill -0 "$ffmpeg_pid" &>/dev/null; do
-        if read -rsn 1 -t "$polling_interval" letter2 < /dev/tty && [[ $letter2 =~ Q|q ]]; then
+        if read -rsn 1 -t "$polling_interval" signal2 < /dev/tty && [[ $signal2 =~ Q|q ]]; then
             kill "$ffmpeg_pid"
             encode_cancelled=true
             break
+        elif [[ $signal2 =~ P|p ]] && ! "$preview_only"; then
+            "$vlc_path" "$ffmpeg_output" &>/dev/null &
         fi
     done
 
     wait "$ffmpeg_pid"
     ffmpeg_exit_status=$?
 
-    print_result
+    "$preview_only" || print_result
 done
 
-"$failure_detected" && exit 1
+"$failure_detected" && die
 exit 0
