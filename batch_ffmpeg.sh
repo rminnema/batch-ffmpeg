@@ -117,6 +117,12 @@ Options:
 
     --hdr_sdr_convert       convert HDR source video to SDR
 
+    --height                change the video's vertical resolution
+                            if you do not set width, aspect ratio will be preserved
+
+    --width                 change the video's horizontal resolution
+                            if you do not set height, aspect ratio will be preserved
+
     --hwaccel               use NVENC hardware acceleration
                             default: off
 
@@ -245,7 +251,7 @@ draw_thumbnail() {
         else
             "$ffmpeg_path" -nostdin -ss "$progress" -i "$ffmpeg_input_file" -vframes 1 -an "$thumbnail" &>/dev/null
         fi
-        
+
         ascii-image-converter -Cc "$thumbnail"
         rm -f "$thumbnail"
     fi
@@ -323,6 +329,7 @@ while (( $# )); do
             video_codec=x264
             audio_codec=libfdk_aac
             hdr_sdr_convert=true
+            ps5_options=( -colorspace 2020 -color_trc smpte2084 -color_primaries 2020 )
             ;;
         --acodec)
             audio_codec="$1"
@@ -342,6 +349,14 @@ while (( $# )); do
             ;;
         --update-interval|-n)
             update_interval=$(sed 's/[^0-9\.]//g' <<< "$1")
+            shift
+            ;;
+        --height)
+            height=$(sed 's/[^0-9]//g' <<< "$1")
+            shift
+            ;;
+        --width)
+            width=$(sed 's/[^0-9]//g' <<< "$1")
             shift
             ;;
         --nosubs|--no-subs)
@@ -436,6 +451,10 @@ else
     esac
 fi
 
+if (( crf == 0 )) && [[ "$video_codec" == libx265 ]]; then
+    x265_params="${x265_params:+$x265_params:}lossless"
+fi
+
 case "${audio_codec,,}" in
     *flac*)
         audio_codec=flac ;;
@@ -450,12 +469,22 @@ esac
 preset="${preset:-medium}"
 if "$hwaccel"; then
     case "${preset,,}" in
-        *fast*)
-            preset=fast ;;
-        *slow*)
-            preset=slow ;;
+        fastest)
+            preset=p1 ;;
+        faster)
+            preset=p2 ;;
+        fast)
+            preset=p3 ;;
+        slow)
+            preset=p5 ;;
+        slower)
+            preset=p6 ;;
+        slowest)
+            preset=p7 ;;
+        lossless)
+            preset=lossless ;;
         *)
-            preset=medium ;;
+            preset=p4 ;;
     esac
 elif ! "$preview_only"; then
     case "${preset,,}" in
@@ -484,10 +513,6 @@ else
     preset=ultrafast
 fi
 
-if [[ "$hdr_sdr_convert" ]]; then
-    video_filter="zscale=transfer=linear,tonemap=hable,zscale=transfer=bt709,format=$pix_fmt"
-fi
-
 update_interval=${update_interval:-1}
 if (( $(echo "$update_interval < 0.1" | bc -l) )); then
     update_interval=0.1
@@ -504,6 +529,17 @@ else
     echo "$crf"
 fi
 echo "Preset: $preset"
+
+if [[ "$height" || "$width" ]]; then
+    if (( width > 10000 || height > 10000 )); then
+        die "Dimension out of bounds"
+    fi
+
+    [[ "$height" ]] || height=-1
+    [[ "$width" ]] || width=-1
+
+    video_filters="zscale=h=$height:w=$width"
+fi
 
 if "$copysubs"; then
     stream_codecs=( -c:a "$audio_codec" -c:s copy )
@@ -522,13 +558,13 @@ if ! "$preview_only"; then
     else
         echo "Will not overwrite previous encodes"
     fi
-    
+
     if "$deletesource"; then
         echo "Will delete the source file on a successful encode."
     else
         echo "Will keep the source file on a successful encode."
     fi
-    
+
     if "$rm_partial"; then
         echo "Will remove partially completed encodes."
     else
@@ -536,8 +572,40 @@ if ! "$preview_only"; then
     fi
 fi
 
+declare -A stream_parameters
 if [[ "$hdr_sdr_convert" ]]; then
     echo "Will perform HDR->SDR color conversion"
+    if [[ "$video_filters" ]]; then
+        video_filters="$video_filters:t=linear,tonemap=hable,zscale=t=709"
+    else
+        video_filters="zscale=t=linear,tonemap=hable,zscale=t=709"
+    fi
+else
+    echo "Will preserve any HDR metadata in the source"
+
+    videoparams=$(ffprobe -prefix -unit -show_streams -select_streams v "$input" 2>/dev/null | sed '/^\[/d')
+    while IFS='=' read -r parameter value; do
+        stream_parameters["$parameter"]="$value"
+    done <<< "$videoparams"
+
+    pix_fmt=${stream_parameters[pix__fmt]}
+    color_range=${stream_parameters[color_range]}
+    chroma_sample_location=${stream_parameters[chroma_location]}
+    colorspace=${stream_parameters[color_space]}
+    color_trc=${stream_parameters[color_transfer]}
+    color_primaries=${stream_parameters[color_primaries]}
+
+    if [[ "$colorspace" == bt2020nc && "$color_primaries" == bt2020 && "$color_trc" == smpte2084 ]]; then
+        case "$color_range" in
+            tv)
+                range=limited ;;
+            pc)
+                range=full ;;
+        esac
+        x265_params="${x265_params:+$x265_params:}colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=$range:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)"
+        profile=main10
+        pix_fmt=yuv420p10le
+    fi
 fi
 
 echo
@@ -614,13 +682,15 @@ for input_video in "${input_videos[@]}"; do
         $overwrite_flag
         $hwaccel_flags
         -nostdin
+        ${ps5_options[@]:+"${ps5_options[@]}"}
         -i "$ffmpeg_input"
         ${video_codec:+-c:v "$video_codec"}
         ${profile:+-profile:v "$profile"}
         ${crf:+-crf "$crf"}
         ${preset:+-preset:v "$preset"}
         ${pix_fmt:+-pix_fmt "$pix_fmt"}
-        ${video_filter:+-vf "$video_filter"}
+        ${x265_params:+-x265-params "$x265_params"}
+        ${video_filters:+-filter:v "$video_filters"}
         "${stream_codecs[@]}"
         ${audio_bitrate:+-b:a "$audio_bitrate"}
         "${mapping[@]}"
