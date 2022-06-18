@@ -123,6 +123,8 @@ Options:
     --width                 change the video's horizontal resolution
                             if you do not set height, aspect ratio will be preserved
 
+    --framerate             change the frame rate of the output video
+
     --hwaccel               use NVENC hardware acceleration
                             default: off
 
@@ -260,7 +262,7 @@ draw_thumbnail() {
 print_cmdline() {
     echo -n "$ffmpeg_path" | sed "s/^.*\s.*$/'&'/"
     for opt in "${ffmpeg_opts[@]}"; do
-        if grep -Eq "\s" <<< "$opt"; then
+        if grep -Eq "[\s()]" <<< "$opt"; then
             echo -n " ${opt@Q}"
         else
             echo -n " $opt"
@@ -359,6 +361,10 @@ while (( $# )); do
             width=$(sed 's/[^0-9]//g' <<< "$1")
             shift
             ;;
+        --framerate)
+            framerate=$(sed 's/[^0-9]//g' <<< "$1")
+            shift
+            ;;
         --nosubs|--no-subs)
             copysubs=false ;;
         --deletesource)
@@ -373,7 +379,6 @@ while (( $# )); do
             resume_on_failure=true ;;
         --hwaccel)
             hwaccel=true
-            hwaccel_flags="-hwaccel nvdec -hwaccel_output_format cuda -extra_hw_frames 5"
             ;;
         --no-progress-bar)
             show_progress_bar=false ;;
@@ -452,7 +457,7 @@ else
 fi
 
 if (( crf == 0 )) && [[ "$video_codec" == libx265 ]]; then
-    x265_params="${x265_params:+$x265_params:}lossless"
+    x265_params="lossless"
 fi
 
 case "${audio_codec,,}" in
@@ -582,30 +587,6 @@ if [[ "$hdr_sdr_convert" ]]; then
     fi
 else
     echo "Will preserve any HDR metadata in the source"
-
-    videoparams=$(ffprobe -prefix -unit -show_streams -select_streams v "$input" 2>/dev/null | sed '/^\[/d')
-    while IFS='=' read -r parameter value; do
-        stream_parameters["$parameter"]="$value"
-    done <<< "$videoparams"
-
-    pix_fmt=${stream_parameters[pix__fmt]}
-    color_range=${stream_parameters[color_range]}
-    chroma_sample_location=${stream_parameters[chroma_location]}
-    colorspace=${stream_parameters[color_space]}
-    color_trc=${stream_parameters[color_transfer]}
-    color_primaries=${stream_parameters[color_primaries]}
-
-    if [[ "$colorspace" == bt2020nc && "$color_primaries" == bt2020 && "$color_trc" == smpte2084 ]]; then
-        case "$color_range" in
-            tv)
-                range=limited ;;
-            pc)
-                range=full ;;
-        esac
-        x265_params="${x265_params:+$x265_params:}colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=$range:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)"
-        profile=main10
-        pix_fmt=yuv420p10le
-    fi
 fi
 
 echo
@@ -640,6 +621,41 @@ for input_video in "${input_videos[@]}"; do
         head -n 1 |
         awk 'function roundup(x) { y=int(x); return x-y>=0.5?y+1:y; } { printf "%0d\n",roundup($1 / 1000) }'
     )
+
+    if [[ -z "$hdr_sdr_convert" ]]; then
+        if [[ "$video_codec" == libx265 || "$video_codec" == hevc_nvenc ]]; then
+            videoparams=$(ffprobe -prefix -unit -show_streams -select_streams v "$input_video" 2>/dev/null | sed '/^\[/d')
+            while IFS='=' read -r parameter value; do
+                stream_parameters["$parameter"]="$value"
+            done <<< "$videoparams"
+
+            pix_fmt=${stream_parameters[pix_fmt]}
+            color_range=${stream_parameters[color_range]}
+            chroma_sample_location=${stream_parameters[chroma_location]}
+            colorspace=${stream_parameters[color_space]}
+            color_trc=${stream_parameters[color_transfer]}
+            color_primaries=${stream_parameters[color_primaries]}
+
+            if [[ "$colorspace" == bt2020nc && "$color_primaries" == bt2020 && "$color_trc" == smpte2084 ]]; then
+                case "$color_range" in
+                    tv)
+                        range=limited ;;
+                    pc)
+                        range=full ;;
+                esac
+                x265_params="${x265_params:+$x265_params:}colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=$range:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)"
+                profile=main10
+                pix_fmt=yuv420p10le
+            elif grep "lossless" <<< "$x265_params"; then
+                x265_params='lossless'
+            else
+                x265_params=''
+            fi
+        else
+            x265_params=''
+        fi
+    fi
+
     videoname=$(basename "$input_video")
     videopath=$(dirname "$input_video")
     if [[ "$user_outputdir" ]]; then
@@ -680,7 +696,6 @@ for input_video in "${input_videos[@]}"; do
     ffmpeg_opts=(
         -stats_period 0.1
         $overwrite_flag
-        $hwaccel_flags
         -nostdin
         ${ps5_options[@]:+"${ps5_options[@]}"}
         -i "$ffmpeg_input"
@@ -691,6 +706,7 @@ for input_video in "${input_videos[@]}"; do
         ${pix_fmt:+-pix_fmt "$pix_fmt"}
         ${x265_params:+-x265-params "$x265_params"}
         ${video_filters:+-filter:v "$video_filters"}
+        ${framerate:+-r "$framerate"}
         "${stream_codecs[@]}"
         ${audio_bitrate:+-b:a "$audio_bitrate"}
         "${mapping[@]}"
