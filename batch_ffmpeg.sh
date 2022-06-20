@@ -108,6 +108,9 @@ Options:
                             options: copy, aac, flac
                             default: copy
 
+    --srt                   transcode subtitles to SRT
+                            Usually only use this if you cannot copy subtitles
+
     --crf, -c               set x264 or x265 constant rate factor
                             range: [0 - 51]
                             default: 22
@@ -276,19 +279,6 @@ if [[ "$user" == root ]]; then
     die "You must run this script as a regular user."
 fi
 
-# If there's an ffmpeg.exe, use that
-if ffmpeg_path=$(command -v ffmpeg.exe); then
-    vlc_path=$(command -v vlc.exe)
-    echo "Using Windows ffmpeg.exe"
-    windows=true
-elif ffmpeg_path=$(command -v ffmpeg); then
-    vlc_path=$(command -v vlc)
-    echo "Using Linux ffmpeg"
-    windows=false
-else
-    die "ffmpeg was not found on this machine."
-fi
-
 # Set defaults
 crf=22
 preset=slow
@@ -388,6 +378,8 @@ while (( $# )); do
             debugging=true ;;
         --preview-only)
             preview_only=true ;;
+        --srt)
+            srt=true ;;
         *)
             die "unrecognized flag '$flag'"
             ;;
@@ -407,6 +399,19 @@ for filepath in "${input[@]}"; do
         die
     fi
 done
+
+# If there's an ffmpeg.exe, use that
+if ffmpeg_path=$(command -v ffmpeg.exe); then
+    vlc_path=$(command -v vlc.exe)
+    echo "Using Windows ffmpeg.exe"
+    windows=true
+elif ffmpeg_path=$(command -v ffmpeg); then
+    vlc_path=$(command -v vlc)
+    echo "Using Linux ffmpeg"
+    windows=false
+else
+    die "ffmpeg was not found on this machine."
+fi
 
 crf=$(sed 's/[^0-9]//g' <<< "$crf")
 
@@ -546,14 +551,20 @@ if [[ "$height" || "$width" ]]; then
     video_filters="zscale=h=$height:w=$width"
 fi
 
+if [[ "$srt" ]]; then
+    sub_codec='srt'
+else
+    sub_codec='copy'
+fi
+
 if "$copysubs"; then
-    stream_codecs=( -c:a "$audio_codec" -c:s copy )
+    stream_codecs=( -c:a "$audio_codec" -c:s "$sub_codec" )
     mapping=( -map 0 )
-    echo "Will copy subtitles"
+    echo "Will transfer or copy subtitles"
 else
     stream_codecs=( -c:a "$audio_codec" )
     mapping=( -map 0:v -map 0:a )
-    echo "Will not copy subtitles"
+    echo "Will not transfer or copy subtitles"
 fi
 
 if ! "$preview_only"; then
