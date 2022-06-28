@@ -403,10 +403,12 @@ done
 # If there's an ffmpeg.exe, use that
 if ffmpeg_path=$(command -v ffmpeg.exe); then
     vlc_path=$(command -v vlc.exe)
+    ffprobe_path=$(command -v ffprobe.exe)
     echo "Using Windows ffmpeg.exe"
     windows=true
 elif ffmpeg_path=$(command -v ffmpeg); then
     vlc_path=$(command -v vlc)
+    ffprobe_path=$(command -v ffprobe)
     echo "Using Linux ffmpeg"
     windows=false
 else
@@ -635,7 +637,7 @@ for input_video in "${input_videos[@]}"; do
 
     if [[ -z "$hdr_sdr_convert" ]]; then
         if [[ "$video_codec" == libx265 || "$video_codec" == hevc_nvenc ]]; then
-            videoparams=$(ffprobe -prefix -unit -show_streams -select_streams v "$input_video" 2>/dev/null | sed '/^\[/d')
+            videoparams=$("$ffprobe_path" -prefix -unit -show_streams -select_streams v "$input_video" 2>/dev/null | sed '/^\[/d')
             while IFS='=' read -r parameter value; do
                 stream_parameters["$parameter"]="$value"
             done <<< "$videoparams"
