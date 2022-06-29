@@ -561,11 +561,11 @@ fi
 
 if "$copysubs"; then
     stream_codecs=( -c:a "$audio_codec" -c:s "$sub_codec" )
-    mapping=( -map 0:v -map 0:a -map 0:s )
+    mapping=( -map 0:v -map 0:a? -map 0:s? )
     echo "Will transfer or copy subtitles"
 else
     stream_codecs=( -c:a "$audio_codec" )
-    mapping=( -map 0:v -map 0:a )
+    mapping=( -map 0:v -map 0:a? )
     echo "Will not transfer or copy subtitles"
 fi
 
