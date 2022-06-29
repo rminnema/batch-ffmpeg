@@ -265,7 +265,7 @@ draw_thumbnail() {
 print_cmdline() {
     echo -n "$ffmpeg_path" | sed "s/^.*\s.*$/'&'/"
     for opt in "${ffmpeg_opts[@]}"; do
-        if grep -Eq "[\s()]" <<< "$opt"; then
+        if grep -Eq "[ ()]" <<< "$opt"; then
             echo -n " ${opt@Q}"
         else
             echo -n " $opt"
