@@ -228,9 +228,9 @@ print_result() {
         echo "Error: encode failed after $(seconds_to_english "$duration") at $(date "+%I:%M:%S %p")"
         echo "Here are the logs generated:"
         echo
-        printf "#%.0s" $(seq $(tput cols))
+        printf "#%.0s" $(seq "$(tput cols)")
         tail "$ffmpeg_progress"
-        printf "#%.0s" $(seq $(tput cols))
+        printf "#%.0s" $(seq "$(tput cols)")
         echo
         echo
         echo "Encoding options were:"
@@ -252,9 +252,9 @@ print_result() {
 draw_thumbnail() {
     if progress=$(calculate_progress); then
         if "$windows"; then
-            "$ffmpeg_path" -nostdin -ss "$progress" -i "$ffmpeg_input_file" -vframes 1 -an "$(wslpath -w "$thumbnail")" &>/dev/null
+            "$ffmpeg_path" -nostdin -ss "$progress" -i "$ffmpeg_input" -vframes 1 -an "$(wslpath -w "$thumbnail")" &>/dev/null
         else
-            "$ffmpeg_path" -nostdin -ss "$progress" -i "$ffmpeg_input_file" -vframes 1 -an "$thumbnail" &>/dev/null
+            "$ffmpeg_path" -nostdin -ss "$progress" -i "$ffmpeg_input" -vframes 1 -an "$thumbnail" &>/dev/null
         fi
 
         ascii-image-converter -Cc "$thumbnail"
@@ -644,7 +644,6 @@ for input_video in "${input_videos[@]}"; do
 
             pix_fmt=${stream_parameters[pix_fmt]}
             color_range=${stream_parameters[color_range]}
-            chroma_sample_location=${stream_parameters[chroma_location]}
             colorspace=${stream_parameters[color_space]}
             color_trc=${stream_parameters[color_transfer]}
             color_primaries=${stream_parameters[color_primaries]}
@@ -708,7 +707,7 @@ for input_video in "${input_videos[@]}"; do
 
     ffmpeg_opts=(
         -stats_period 0.1
-        $overwrite_flag
+        ${overwrite_flag:+"$overwrite_flag"}
         -nostdin
         ${ps5_options[@]:+"${ps5_options[@]}"}
         -i "$ffmpeg_input"
@@ -730,7 +729,7 @@ for input_video in "${input_videos[@]}"; do
     if (( "${BASH_VERSION::1}" >= 5 )); then
         encoding_start_time=$EPOCHSECONDS
     else
-        encodeing_start_time=$(date +%s)
+        encoding_start_time=$(date +%s)
     fi
     echo "Encoding $videoname"
     if "$debugging"; then
