@@ -4,7 +4,7 @@ batch\_ffmpeg is a script intended to encode a number of videos with easily conf
 
 ## Usage
 
-For a full list of options, invoke batch\_ffmpeg with the `-h` flag, i.e. `./batch\_ffmpeg.sh -h`
+For a full list of options, invoke batch\_ffmpeg with the `-h` flag, i.e. `./batch_ffmpeg.sh -h`
 
 The most important parameter that batch\_ffmpeg takes is the input parameter, which tells batch\_ffmpeg which file to encode or which directory tree contains files to encode.
 By default, batch\_ffmpeg will encode all videos found in `~/transcoding/source` and place them in `~/transcoding/sink`. This can be changed with the `--input` or `-i` flag, followed by the path.
