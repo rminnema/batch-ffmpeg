@@ -58,7 +58,7 @@ calculate_progress() {
 exit_hook() {
     kill "${bg_pids[@]}" &>/dev/null
     rm -f "$ffmpeg_progress" "$thumbnail"
-    if [[ "$ffmpeg_exit_status" != 0 ]] && "$rm_partial"; then
+    if [[ "$ffmpeg_exit_status" != 0 ]] && "$rm_partial" && [[ "$output_video" != "$input_video" ]]; then
         rm -f "$output_video"
     fi
 }
@@ -624,6 +624,7 @@ polling_interval=0.005
 
 # Loop over every file in the directories provided by the user
 for input_video in "${input_videos[@]}"; do
+    input_video=$(readlink -f "$input_video")
     if [[ "$signal1" =~ Q|q ]]; then
         die
     fi
