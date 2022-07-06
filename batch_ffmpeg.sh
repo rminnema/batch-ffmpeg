@@ -620,7 +620,7 @@ trap exit_hook EXIT
 ffmpeg_progress=$(mktemp)
 encode_cancelled=false
 failure_detected=false
-polling_interval=0.005
+polling_interval=0.05
 
 # Loop over every file in the directories provided by the user
 for input_video in "${input_videos[@]}"; do
@@ -710,7 +710,7 @@ for input_video in "${input_videos[@]}"; do
         -stats_period 0.1
         ${overwrite_flag:+"$overwrite_flag"}
         -nostdin
-        ${ps5_options[@]:+"${ps5_options[@]}"}
+        "${ps5_options[@]}"
         -i "$ffmpeg_input"
         ${video_codec:+-c:v "$video_codec"}
         ${profile:+-profile:v "$profile"}
