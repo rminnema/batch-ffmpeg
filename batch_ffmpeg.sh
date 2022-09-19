@@ -61,6 +61,50 @@ exit_hook() {
     if [[ "$ffmpeg_exit_status" != 0 ]] && "$rm_partial" && [[ "$output_video" != "$input_video" ]]; then
         rm -f "$output_video"
     fi
+
+    task_complete_time=$(date "+%B %d, %Y %I:%M %p")
+    total_encode_attempts=$(( ${#successful_encodes[@]} + ${#failed_encodes[@]} + ${#cancelled_encodes[@]} ))
+    if (( ${#emails[@]} > 0 && total_encode_attempts > 0 )); then
+        {
+            for email in "${emails[@]}"; do
+                echo "To: $email"
+            done
+            if (( ${#failed_encodes[@]} + ${#cancelled_encodes[@]} == 0 )); then
+                echo "Subject: All encoding tasks were successful"
+            elif (( ${#successful_encodes[@]} > 0 )); then
+                echo "Subject: Some encodes failed or were cancelled."
+            else
+                echo "Subject: All encodes failed or were cancelled."
+            fi
+            echo
+            if (( ${#successful_encodes[@]} > 0 )); then
+                echo "There were ${#successful_encodes[@]} successful encodes:"
+                {
+                    echo "Video|Compression Ratio"
+                    for video in "${!successful_encodes[@]}"; do
+                        cr=${successful_encodes["$video"]}
+                        echo "$video|$cr"
+                    done
+                } | column -ts '|'
+                echo
+            fi
+            if (( ${#failed_encodes[@]} > 0 )); then
+                echo "There were ${#failed_encodes[@]} failed encodes:"
+                for video in "${failed_encodes[@]}"; do
+                    echo "$video"
+                done
+                echo
+            fi
+            if (( ${#cancelled_encodes[@]} > 0 )); then
+                echo "${#cancelled_encodes[@]} were cancelled:"
+                for video in "${cancelled_encodes[@]}"; do
+                    echo "$video"
+                done
+                echo
+            fi
+            echo
+        } | sendmail -t
+    fi
 }
 
 # Converts seconds to string in form of HH:MM:SS
@@ -159,6 +203,12 @@ Options:
 
     --debug                 print debugging information (namely the parameters passed to ffmpeg)
 
+    --email                 email results on completion
+
+    --force-linux           force use of Linux ffmpeg
+
+    --cmdline-only          print the command line arguments for ffmpeg and exit
+
 EOF
     die
 }
@@ -208,6 +258,7 @@ print_result() {
         echo "Input size: $(print_size <<< "$input_size")"
         echo "Output size: $(print_size <<< "$output_size")"
         echo "Compression ratio: $cr"
+        successful_encodes["$input_video"]=$cr
         if (( $(awk -v cr="$cr" 'BEGIN { print cr <= 1 }') )); then
             echo "Warning: Low compression ratio"
             echo "Check settings"
@@ -221,6 +272,7 @@ print_result() {
         echo
         echo "Encode cancelled after $(seconds_to_english "$duration") at $(date "+%I:%M:%S %p")"
         echo
+        cancelled_encodes+=( "$input_video" )
         die
     # Failed encode
     else
@@ -239,6 +291,7 @@ print_result() {
         echo
         echo
         touch "$output_video.failed_encode"
+        failed_encodes+=( "$input_video" )
         if ! "$resume_on_failure"; then
             die
         fi
@@ -266,9 +319,9 @@ print_cmdline() {
     echo -n "$ffmpeg_path" | sed "s/^.*\s.*$/'&'/"
     for opt in "${ffmpeg_opts[@]}"; do
         if grep -Eq "[ ()]" <<< "$opt"; then
-            echo -n " ${opt@Q}"
+            printf ' %s' "${opt@Q}"
         else
-            echo -n " $opt"
+            printf ' %s' "$opt"
         fi
     done
     echo
@@ -295,6 +348,9 @@ show_progress_bar=true
 draw_thumbnails=false
 debugging=false
 preview_only=false
+force_linux=false
+cmdline_only=false
+emails=()
 
 # Parse user-provided options
 shopt -s nocasematch
@@ -355,6 +411,10 @@ while (( $# )); do
             framerate=$(sed 's/[^0-9]//g' <<< "$1")
             shift
             ;;
+        --email)
+            emails+=( $1 )
+            shift
+            ;;
         --nosubs|--no-subs)
             copysubs=false ;;
         --deletesource)
@@ -368,8 +428,7 @@ while (( $# )); do
         --resume_on_failure)
             resume_on_failure=true ;;
         --hwaccel)
-            hwaccel=true
-            ;;
+            hwaccel=true ;;
         --no-progress-bar)
             show_progress_bar=false ;;
         --draw-thumbnails)
@@ -380,6 +439,10 @@ while (( $# )); do
             preview_only=true ;;
         --srt)
             srt=true ;;
+        --force-linux)
+            force_linux=true ;;
+        --cmdline-only)
+            cmdline_only=true ;;
         *)
             die "unrecognized flag '$flag'"
             ;;
@@ -401,7 +464,7 @@ for filepath in "${input[@]}"; do
 done
 
 # If there's an ffmpeg.exe, use that
-if ffmpeg_path=$(command -v ffmpeg.exe); then
+if ! "$force_linux" && ffmpeg_path=$(command -v ffmpeg.exe); then
     vlc_path=$(command -v vlc.exe)
     ffprobe_path=$(command -v ffprobe.exe)
     echo "Using Windows ffmpeg.exe"
@@ -622,6 +685,10 @@ encode_cancelled=false
 failure_detected=false
 polling_interval=0.05
 
+declare -A successful_encodes
+failed_encodes=()
+cancelled_encodes=()
+
 # Loop over every file in the directories provided by the user
 for input_video in "${input_videos[@]}"; do
     input_video=$(readlink -f "$input_video")
@@ -638,7 +705,7 @@ for input_video in "${input_videos[@]}"; do
 
     if [[ -z "$hdr_sdr_convert" ]]; then
         if [[ "$video_codec" == libx265 || "$video_codec" == hevc_nvenc ]]; then
-            videoparams=$("$ffprobe_path" -prefix -unit -show_streams -select_streams v "$input_video" 2>/dev/null | sed '/^\[/d')
+            videoparams=$("$ffprobe_path" -prefix -unit -show_streams -select_streams v "$input_video" 2>/dev/null | sed -re 's/\r//g' -e '/^\[/d')
             while IFS='=' read -r parameter value; do
                 stream_parameters["$parameter"]="$value"
             done <<< "$videoparams"
@@ -727,6 +794,11 @@ for input_video in "${input_videos[@]}"; do
         ${ffmpeg_output:+"$ffmpeg_output"}
     )
 
+    if "$cmdline_only"; then
+        print_cmdline
+        echo
+        continue
+    fi
     if (( "${BASH_VERSION::1}" >= 5 )); then
         encoding_start_time=$EPOCHSECONDS
     else
