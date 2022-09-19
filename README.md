@@ -1,6 +1,6 @@
 # batch\_ffmpeg
 
-batch\_ffmpeg is a script intended to encode a number of videos with easily configurable options and interesting features.
+batch\_ffmpeg is a Bash script intended to encode a number of videos with easily configurable options and interesting features.
 
 ## Usage
 
