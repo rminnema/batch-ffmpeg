@@ -96,7 +96,7 @@ exit_hook() {
                 echo
             fi
             if (( ${#cancelled_encodes[@]} > 0 )); then
-                echo "${#cancelled_encodes[@]} were cancelled:"
+                echo "${#cancelled_encodes[@]} encodes were cancelled:"
                 for video in "${cancelled_encodes[@]}"; do
                     echo "$video"
                 done
