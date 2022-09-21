@@ -63,18 +63,18 @@ exit_hook() {
     fi
 
     task_complete_time=$(date "+%B %d, %Y %I:%M %p")
-    total_encode_attempts=$(( ${#successful_encodes[@]} + ${#failed_encodes[@]} + ${#cancelled_encodes[@]} ))
-    if (( ${#emails[@]} > 0 && total_encode_attempts > 0 )); then
+    encode_attempts=$(( ${#successful_encodes[@]} + ${#failed_encodes[@]} ))
+    if (( ${#emails[@]} > 0 && encode_attempts > 0 )); then
         {
             for email in "${emails[@]}"; do
                 echo "To: $email"
             done
-            if (( ${#failed_encodes[@]} + ${#cancelled_encodes[@]} == 0 )); then
-                echo "Subject: All encoding tasks were successful"
+            if (( ${#failed_encodes[@]} == 0 )); then
+                echo "Subject: All ffmpeg encoding tasks were successful"
             elif (( ${#successful_encodes[@]} > 0 )); then
-                echo "Subject: Some encodes failed or were cancelled."
+                echo "Subject: Some ffmpeg encoding tasks failed."
             else
-                echo "Subject: All encodes failed or were cancelled."
+                echo "Subject: All ffmpeg encoding tasks failed."
             fi
             echo
             if (( ${#successful_encodes[@]} > 0 )); then
@@ -91,13 +91,6 @@ exit_hook() {
             if (( ${#failed_encodes[@]} > 0 )); then
                 echo "There were ${#failed_encodes[@]} failed encodes:"
                 for video in "${failed_encodes[@]}"; do
-                    echo "$video"
-                done
-                echo
-            fi
-            if (( ${#cancelled_encodes[@]} > 0 )); then
-                echo "${#cancelled_encodes[@]} encodes were cancelled:"
-                for video in "${cancelled_encodes[@]}"; do
                     echo "$video"
                 done
                 echo
@@ -125,6 +118,35 @@ seconds_to_english() {
 
     echo "${hours:+#$hours hours, }${minutes:+#$minutes minutes, }${seconds:+#$seconds seconds}" |
         sed -re 's/, $//' -e 's/#(1 [a-z]+)s/#\1/g' -e 's/#//g'
+}
+
+parse_timespec_to_seconds() {
+    timespec=$1
+
+    grep -Eq -- "^-?(([0-9]{1,2}:){0,2}[0-9]{1,2}(\.[0-9]+)?|[0-9]+(\.[0-9]+)?((u|m)?s)?)$" <<< "$timespec" || return 1
+
+    read -r seconds minutes hours < <(tr -d '-' <<< "$timespec" | awk -F ':' '{ for (i=NF;i>0;i--) printf("%s ",$i)}')
+    if [[ "$seconds" =~ ms ]]; then
+        seconds=$(sed 's/[^0-9]//g' <<< "$seconds" | awk '{ printf("%f", $0 / 10**3 ) }')
+    elif [[ "$seconds" =~ us ]]; then
+        seconds=$(sed 's/[^0-9]//g' <<< "$seconds" | awk '{ printf("%f", $0 / 10**6 ) }')
+    fi
+    integer_seconds=$(awk -F '.' '{ print $1 }' <<< "$seconds")
+    fractional_seconds=$(awk -F '.' '{ print $2 }' <<< "$seconds" | sed 's/0*$//')
+    if (( integer_seconds > 59 )); then
+        minutes=$(( minutes + 1 ))
+        integer_seconds=$(( seconds - 60 ))
+    fi
+    if (( minutes > 59 )); then
+        hours=$(( hours + 1 ))
+        minutes=$(( minutes - 60 ))
+    fi
+    seconds="$(awk -v s="$integer_seconds" -v m="$minutes" -v h="$hours" 'BEGIN { printf("%s",s + 60*m + 60*60*h) }')"
+    if [[ "$fractional_seconds" ]]; then
+        seconds+=".$fractional_seconds"
+    fi
+    [[ "$timespec" =~ - ]] && seconds="-$seconds"
+    echo "$seconds"
 }
 
 usage() {
@@ -170,7 +192,9 @@ Options:
     --width                 change the video's horizontal resolution
                             if you do not set height, aspect ratio will be preserved
 
-    --framerate             change the frame rate of the output video
+    --framerate             change the frame rate of the output videos
+
+    --duration              limit the duration of the output to this value
 
     --hwaccel               use NVENC hardware acceleration
                             default: off
@@ -272,7 +296,6 @@ print_result() {
         echo
         echo "Encode cancelled after $(seconds_to_english "$duration") at $(date "+%I:%M:%S %p")"
         echo
-        cancelled_encodes+=( "$input_video" )
         die
     # Failed encode
     else
@@ -409,6 +432,10 @@ while (( $# )); do
             ;;
         --framerate)
             framerate=$(sed 's/[^0-9]//g' <<< "$1")
+            shift
+            ;;
+        --duration)
+            output_duration=$(parse_timespec_to_seconds "$1")
             shift
             ;;
         --email)
@@ -687,7 +714,6 @@ polling_interval=0.05
 
 declare -A successful_encodes
 failed_encodes=()
-cancelled_encodes=()
 
 # Loop over every file in the directories provided by the user
 for input_video in "${input_videos[@]}"; do
@@ -702,6 +728,9 @@ for input_video in "${input_videos[@]}"; do
         head -n 1 |
         awk 'function roundup(x) { y=int(x); return x-y>=0.5?y+1:y; } { printf "%0d\n",roundup($1 / 1000) }'
     )
+    if [[ "$output_duration" ]] && (( output_duration < source_duration )); then
+        source_duration=$output_duration
+    fi
 
     if [[ -z "$hdr_sdr_convert" ]]; then
         if [[ "$video_codec" == libx265 || "$video_codec" == hevc_nvenc ]]; then
@@ -787,6 +816,7 @@ for input_video in "${input_videos[@]}"; do
         ${x265_params:+-x265-params "$x265_params"}
         ${video_filters:+-filter:v "$video_filters"}
         ${framerate:+-r "$framerate"}
+        ${output_duration:+-t "$output_duration"}
         "${stream_codecs[@]}"
         ${audio_bitrate:+-b:a "$audio_bitrate"}
         "${mapping[@]}"
@@ -832,8 +862,8 @@ for input_video in "${input_videos[@]}"; do
         while true; do
             kill -0 "$ffmpeg_pid" &>/dev/null || break
             if progress=$(calculate_progress); then
-                pct_progress=$(( 100 * progress / source_duration ))
-                display_progress_bar "$pct_progress"
+                percent_progress=$(( 100 * progress / source_duration ))
+                display_progress_bar "$percent_progress"
             fi
             sleep "$update_interval"
         done &
