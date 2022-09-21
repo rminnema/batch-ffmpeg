@@ -182,7 +182,7 @@ Options:
     --format,-f             specify file format MP4 or MKV
 
     --vcodec                select a codec to encode the video stream with
-                            options: x264, x265
+                            options: x264, x265, copy
                             default: x265
 
     --acodec                select a codec to encode the audio stream with
@@ -451,7 +451,7 @@ while (( $# )); do
             shift
             ;;
         --duration)
-            output_duration=$(parse_timespec_to_seconds "$1")
+            output_duration=$(parse_timespec_to_seconds "$1") || die "Invalid timespec"
             shift
             ;;
         --email)
@@ -560,6 +560,9 @@ else
             video_codec=libx264
             profile=main
             pix_fmt=yuv420p
+            ;;
+        *copy*)
+            video_codec=copy
             ;;
         *)
             video_codec=libx265
