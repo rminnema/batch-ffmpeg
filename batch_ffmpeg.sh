@@ -62,6 +62,10 @@ exit_hook() {
         rm -f "$output_video"
     fi
 
+    tasks_cancelled=false
+    if [[ "$signal2" =~ [Qq] ]]; then
+        tasks_cancelled=true
+    fi
     task_complete_time=$(date "+%B %d, %Y %I:%M %p")
     encode_attempts=$(( ${#successful_encodes[@]} + ${#failed_encodes[@]} ))
     if (( ${#emails[@]} > 0 && encode_attempts > 0 )); then
@@ -77,6 +81,17 @@ exit_hook() {
                 echo "Subject: All ffmpeg encoding tasks failed."
             fi
             echo
+            if "$tasks_cancelled"; then
+                echo "batch_ffmpeg execution cancelled"
+            elif (( ${#failed_encodes[@]} == 0 )); then
+                echo "batch_ffmpeg execution completed successfully"
+            else
+                echo "batch_ffmpeg execution completed with errors"
+            fi
+            echo "Tasks started: $task_start_time"
+            echo "Tasks completed: $task_complete_time"
+            echo "Options:"
+            echo "./batch_ffmpeg.sh $option_string"
             if (( ${#successful_encodes[@]} > 0 )); then
                 echo "There were ${#successful_encodes[@]} successful encodes:"
                 {
@@ -376,6 +391,7 @@ cmdline_only=false
 emails=()
 
 # Parse user-provided options
+option_string=$*
 shopt -s nocasematch
 while (( $# )); do
     flag=$1
@@ -439,7 +455,7 @@ while (( $# )); do
             shift
             ;;
         --email)
-            emails+=( $1 )
+            emails+=( "$1" )
             shift
             ;;
         --nosubs|--no-subs)
@@ -715,6 +731,7 @@ polling_interval=0.05
 declare -A successful_encodes
 failed_encodes=()
 
+task_start_time=$(date "+%B %d, %Y %I:%M %p")
 # Loop over every file in the directories provided by the user
 for input_video in "${input_videos[@]}"; do
     input_video=$(readlink -f "$input_video")
