@@ -62,10 +62,6 @@ exit_hook() {
         rm -f "$output_video"
     fi
 
-    tasks_cancelled=false
-    if [[ "$signal2" =~ [Qq] ]]; then
-        tasks_cancelled=true
-    fi
     task_complete_time=$(date "+%B %d, %Y %I:%M %p")
     encode_attempts=$(( ${#successful_encodes[@]} + ${#failed_encodes[@]} ))
     if (( ${#emails[@]} > 0 && encode_attempts > 0 )); then
@@ -81,7 +77,7 @@ exit_hook() {
                 echo "Subject: All ffmpeg encoding tasks failed."
             fi
             echo
-            if "$tasks_cancelled"; then
+            if "$encode_cancelled"; then
                 echo "batch_ffmpeg execution cancelled"
             elif (( ${#failed_encodes[@]} == 0 )); then
                 echo "batch_ffmpeg execution completed successfully"
