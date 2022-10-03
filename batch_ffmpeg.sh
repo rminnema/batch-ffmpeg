@@ -423,7 +423,11 @@ while (( $# )); do
             shift
             ;;
         --crf|-c)
-            crf=$(sed 's/[^0-9]//g' <<< "$1")
+            crf=$1
+            if [[ -z "$crf" || "$crf" =~ [^0-9] ]]; then
+                echo "CRF must be an integer."
+                exit 1
+            fi
             shift
             ;;
         --preset|-p)
@@ -431,19 +435,31 @@ while (( $# )); do
             shift
             ;;
         --update-interval|-n)
-            update_interval=$(sed 's/[^0-9\.]//g' <<< "$1")
+            update_interval=$1
+            if [[ -z "$update_interval" || "$update_interval" =~ [^.0-9] ]]; then
+                echo "Update_interval must be a number."
+            fi
             shift
             ;;
         --height)
-            height=$(sed 's/[^0-9]//g' <<< "$1")
+            height=$1
+            if [[ -z "$height" || "$height" =~ [^0-9] ]]; then
+                echo "Height must be an integer."
+            fi
             shift
             ;;
         --width)
-            width=$(sed 's/[^0-9]//g' <<< "$1")
+            width=$1
+            if [[ -z "$width" || "$width" =~ [^0-9] ]]; then
+                echo "Width must be an integer."
+            fi
             shift
             ;;
         --framerate)
-            framerate=$(sed 's/[^0-9]//g' <<< "$1")
+            framerate=$1
+            if [[ -z "$framerate" || "$framerate" =~ [^.0-9/] ]]; then
+                echo "Framerate must be a positive number."
+            fi
             shift
             ;;
         --duration)
@@ -516,8 +532,6 @@ elif ffmpeg_path=$(command -v ffmpeg); then
 else
     die "ffmpeg was not found on this machine."
 fi
-
-crf=$(sed 's/[^0-9]//g' <<< "$crf")
 
 if (( crf < 0 || crf > 51 )); then
     echo -n "Warning: CRF given is out of range [0 - 51]. Setting to closest value: "
@@ -630,7 +644,7 @@ else
     preset=ultrafast
 fi
 
-update_interval=${update_interval:-1}
+update_interval=${update_interval:-0.1}
 if (( $(echo "$update_interval < 0.1" | bc -l) )); then
     update_interval=0.1
 fi
