@@ -425,8 +425,7 @@ while (( $# )); do
         --crf|-c)
             crf=$1
             if [[ -z "$crf" || "$crf" =~ [^0-9] ]]; then
-                echo "CRF must be an integer."
-                exit 1
+                die "CRF must be an integer."
             fi
             shift
             ;;
@@ -437,28 +436,28 @@ while (( $# )); do
         --update-interval|-n)
             update_interval=$1
             if [[ -z "$update_interval" || "$update_interval" =~ [^.0-9] ]]; then
-                echo "Update_interval must be a number."
+                die "Update_interval must be a positive number."
             fi
             shift
             ;;
         --height)
             height=$1
             if [[ -z "$height" || "$height" =~ [^0-9] ]]; then
-                echo "Height must be an integer."
+                die "Height must be a positive integer."
             fi
             shift
             ;;
         --width)
             width=$1
             if [[ -z "$width" || "$width" =~ [^0-9] ]]; then
-                echo "Width must be an integer."
+                die "Width must be a positive integer."
             fi
             shift
             ;;
         --framerate)
             framerate=$1
             if [[ -z "$framerate" || "$framerate" =~ [^.0-9/] ]]; then
-                echo "Framerate must be a positive number."
+                die "Framerate must be a positive number."
             fi
             shift
             ;;
