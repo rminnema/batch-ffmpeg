@@ -765,6 +765,7 @@ for input_video in "${input_videos[@]}"; do
         if [[ "$video_codec" == libx265 || "$video_codec" == hevc_nvenc ]]; then
             videoparams=$("$ffprobe_path" -prefix -unit -show_streams -select_streams v "$input_video" 2>/dev/null | sed -re 's/\r//g' -e '/^\[/d')
             while IFS='=' read -r parameter value; do
+                [[ "$parameter" ]] || continue
                 stream_parameters["$parameter"]="$value"
             done <<< "$videoparams"
 
