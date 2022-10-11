@@ -402,8 +402,14 @@ while (( $# )); do
         --help|-h|-\?)
             usage ;;
         --input|-i)
-            input+=( "$1" )
-            shift
+            while (( $# )); do
+                case "$1" in
+                    -*) break ;;
+                    *)  input+=( "$1" )
+                        shift
+                        ;;
+                esac
+            done
             ;;
         --output|-o)
             user_outputdir="$1"
@@ -739,13 +745,18 @@ if [[ "$hdr_sdr_convert" ]]; then
 else
     echo "Will preserve any HDR metadata in the source"
 fi
-
-echo
-read -rsn 1 -p "Press any key to continue."
 echo
 
 # Generate the array of video files
 mapfile -t input_videos < <(find "${input[@]}" ${mindepth:+-mindepth "$mindepth"} ${maxdepth:+-maxdepth "$maxdepth"} -type f -iregex '.*\.\(mp4\|mkv\|webm\|avi\|mov\|wmv\|mpe?g\)$' | sort)
+echo "Input files:"
+for input_video in "${input_videos[@]}"; do
+    echo "$input_video"
+done
+echo
+
+read -rsn 1 -p "Press any key to continue."
+echo
 
 total_size=$(du -bch "${input_videos[@]}" | tail -n 1 | awk '{ print $1 }')
 
