@@ -244,6 +244,12 @@ Options:
 
     --cmdline-only          print the command line arguments for ffmpeg and exit
 
+    --mindepth              do not begin searching for input files until this many levels deep
+                            default: 0
+
+    --maxdepth              do not search for input files beyond this many levels deep
+                            default: infinite
+
 EOF
     die
 }
@@ -467,6 +473,20 @@ while (( $# )); do
             ;;
         --email)
             emails+=( "$1" )
+            shift
+            ;;
+        --mindepth)
+            mindepth=$1
+            if [[ -z "$mindepth" || "$mindepth" =~ [^0-9] ]]; then
+                die "Mindepth must be a non-negative integer"
+            fi
+            shift
+            ;;
+        --maxdepth)
+            maxdepth=$1
+            if [[ -z "$maxdepth" || "$maxdepth" =~ [^0-9] ]]; then
+                die "Maxdepth must be a non-negative integer"
+            fi
             shift
             ;;
         --nosubs|--no-subs)
@@ -725,7 +745,7 @@ read -rsn 1 -p "Press any key to continue."
 echo
 
 # Generate the array of video files
-mapfile -t input_videos < <(find "${input[@]}" -type f -iregex '.*\.\(mp4\|mkv\|webm\|avi\|mov\|wmv\|mpe?g\)$' | sort)
+mapfile -t input_videos < <(find "${input[@]}" ${mindepth:+-mindepth "$mindepth"} ${maxdepth:+-maxdepth "$maxdepth"} -type f -iregex '.*\.\(mp4\|mkv\|webm\|avi\|mov\|wmv\|mpe?g\)$' | sort)
 
 total_size=$(du -bch "${input_videos[@]}" | tail -n 1 | awk '{ print $1 }')
 
