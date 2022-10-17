@@ -16,12 +16,12 @@ die() {
 # for example:
 # 00:23:45 [=======================================>]  99%
 display_progress_bar() {
+    local percentage=$(printf "%3d" "$1")
     if (( percentage < 0 || percentage > 100 )); then
         return 1
     fi
 
     local bar_width=$(( $(tput cols) - 16 ))
-    local percentage=$(printf "%3d" "$1")
     local equals_signs=$(( bar_width * percentage / 100 ))
     local spaces=$(( bar_width - equals_signs - 1 ))
 
@@ -134,9 +134,9 @@ seconds_to_english() {
 parse_timespec_to_seconds() {
     timespec=$1
 
-    grep -Eq -- "^-?(([0-9]{1,2}:){0,2}[0-9]{1,2}(\.[0-9]+)?|[0-9]+(\.[0-9]+)?((u|m)?s)?)$" <<< "$timespec" || return 1
+    grep -Eq -- "^(([0-9]{1,2}:){0,2}[0-9]{1,2}(\.[0-9]+)?|[0-9]+(\.[0-9]+)?((u|m)?s)?)$" <<< "$timespec" || return 1
 
-    read -r seconds minutes hours < <(tr -d '-' <<< "$timespec" | awk -F ':' '{ for (i=NF;i>0;i--) printf("%s ",$i)}')
+    read -r seconds minutes hours < <(awk -F ':' '{ for (i=NF;i>0;i--) printf("%s ",$i)}' <<< "$timespec")
     if [[ "$seconds" =~ ms ]]; then
         seconds=$(sed 's/[^0-9]//g' <<< "$seconds" | awk '{ printf("%f", $0 / 10**3 ) }')
     elif [[ "$seconds" =~ us ]]; then
@@ -156,7 +156,6 @@ parse_timespec_to_seconds() {
     if [[ "$fractional_seconds" ]]; then
         seconds+=".$fractional_seconds"
     fi
-    [[ "$timespec" =~ - ]] && seconds="-$seconds"
     echo "$seconds"
 }
 
@@ -205,7 +204,9 @@ Options:
 
     --framerate             change the frame rate of the output videos
 
-    --duration              limit the duration of the output to this value
+    --start-timestamp       start encoding at this timestamp on the source file
+
+    --end-timestamp         stop encoding at this timestamp on the source file
 
     --hwaccel               use NVENC hardware acceleration
                             default: off
@@ -276,11 +277,11 @@ print_size() {
 }
 
 print_result() {
-    local duration
+    local encoding_elapsed_time
     if (( ${BASH_VERSION::1} >= 5 )); then
-        duration=$(( EPOCHSECONDS - encoding_start_time ))
+        encoding_elapsed_time=$(( EPOCHSECONDS - encoding_start_time ))
     else
-        duration=$(( $(date +%s) - encoding_start_time ))
+        encoding_elapsed_time=$(( $(date +%s) - encoding_start_time ))
     fi
 
     # Since the encoding has stopped, kill the asynchronous processes updating the progress bar or drawing thumbnails
@@ -292,7 +293,7 @@ print_result() {
     if [[ "$ffmpeg_exit_status" == 0 && -s "$output_video" ]]; then
         display_progress_bar 100
         echo
-        echo "Encoding finished successfully in $(seconds_to_english "$duration") at $(date "+%I:%M:%S %p")"
+        echo "Encoding finished successfully in $(seconds_to_english "$encoding_elapsed_time") at $(date "+%I:%M:%S %p")"
         input_size=$(stat -c '%s' "$input_video")
         output_size=$(stat -c '%s' "$output_video")
         cr=$(awk -v i="$input_size" -v o="$output_size" 'BEGIN { printf "%.2f",i/o }')
@@ -311,13 +312,13 @@ print_result() {
     # Canceled encode
     elif "$encode_cancelled"; then
         echo
-        echo "Encode cancelled after $(seconds_to_english "$duration") at $(date "+%I:%M:%S %p")"
+        echo "Encode cancelled after $(seconds_to_english "$encoding_elapsed_time") at $(date "+%I:%M:%S %p")"
         echo
         die
     # Failed encode
     else
         echo
-        echo "Error: encode failed after $(seconds_to_english "$duration") at $(date "+%I:%M:%S %p")"
+        echo "Error: encode failed after $(seconds_to_english "$encoding_elapsed_time") at $(date "+%I:%M:%S %p")"
         echo "Here are the logs generated:"
         echo
         printf "#%.0s" $(seq "$(tput cols)")
@@ -473,8 +474,12 @@ while (( $# )); do
             fi
             shift
             ;;
-        --duration)
-            output_duration=$(parse_timespec_to_seconds "$1") || die "Invalid timespec"
+        --start-timestamp)
+            output_start_timestamp=$(parse_timespec_to_seconds "$1") || die "Invalid timespec"
+            shift
+            ;;
+        --end-timestamp)
+            output_end_timestamp=$(parse_timespec_to_seconds "$1") || die "Invalid timespec"
             shift
             ;;
         --email)
@@ -788,8 +793,20 @@ for input_video in "${input_videos[@]}"; do
         head -n 1 |
         awk 'function roundup(x) { y=int(x); return x-y>=0.5?y+1:y; } { printf "%0d\n",roundup($1 / 1000) }'
     )
-    if [[ "$output_duration" ]] && (( output_duration < source_duration )); then
-        source_duration=$output_duration
+    if [[ -z "$output_end_timestamp" ]] || (( output_end_timestamp > source_duration )); then
+        output_end_timestamp=$source_duration
+    fi
+    if [[ -z "$output_start_timestamp" ]]; then
+        output_start_timestamp=0
+    fi
+    if (( output_start_timestamp > output_end_timestamp )); then
+        tmp=$output_end_timestamp
+        output_end_timestamp=$output_start_timestamp
+        output_start_timestamp=$tmp
+    fi
+    output_duration=$(( output_end_timestamp - output_start_timestamp ))
+    if (( output_duration > source_duration )); then
+        output_duration=$source_duration
     fi
 
     if [[ -z "$hdr_sdr_convert" ]]; then
@@ -877,6 +894,7 @@ for input_video in "${input_videos[@]}"; do
         ${x265_params:+-x265-params "$x265_params"}
         ${video_filters:+-filter:v "$video_filters"}
         ${framerate:+-r "$framerate"}
+        ${output_start_timestamp:+-ss "$output_start_timestamp"}
         ${output_duration:+-t "$output_duration"}
         "${stream_codecs[@]}"
         ${audio_bitrate:+-b:a "$audio_bitrate"}
@@ -923,7 +941,7 @@ for input_video in "${input_videos[@]}"; do
         while true; do
             kill -0 "$ffmpeg_pid" &>/dev/null || break
             if progress=$(calculate_progress); then
-                percent_progress=$(( 100 * progress / source_duration ))
+                percent_progress=$(( 100 * progress / output_duration ))
                 display_progress_bar "$percent_progress"
             fi
             sleep "$update_interval"
