@@ -47,8 +47,8 @@ calculate_progress() {
     local progressline=$(tail -n 1 "$ffmpeg_progress" 2>/dev/null | awk -F '\r' '{ print $(NF - 1) }')
     if [[ "$progressline" ]]; then
         local progress=$(grep -Eo "[0-9]{2}:[0-9]{2}:[0-9]{2}" <<< "$progressline")
-        local progress_s=$(awk -F ':' '{ print $1 * 3600 + $2 * 60 + $3 }' <<< "$progress")
-        echo "$progress_s"
+        IFS=: read -r hours minutes seconds <<< "$progress"
+        echo "$(( hours * 3600 + minutes * 60 + seconds ))"
         return 0
     fi
     return 1
@@ -56,7 +56,7 @@ calculate_progress() {
 
 # Actions to take when the program exits
 exit_hook() {
-    kill "${bg_pids[@]}" &>/dev/null
+    jobs -rp | xargs kill &> /dev/null
     rm -f "$ffmpeg_progress" "$thumbnail"
     if [[ "$ffmpeg_exit_status" != 0 ]] && "$rm_partial" && [[ "$output_video" != "$input_video" ]]; then
         rm -f "$output_video"
@@ -285,8 +285,7 @@ print_result() {
     fi
 
     # Since the encoding has stopped, kill the asynchronous processes updating the progress bar or drawing thumbnails
-    kill "${bg_pids[@]}" &>/dev/null
-    unset "bg_pids"
+    jobs -rp | xargs kill &> /dev/null
     rm -f "$thumbnail"
 
     # Successful encode
@@ -935,8 +934,6 @@ for input_video in "${input_videos[@]}"; do
         echo
     fi
 
-    bg_pids=()
-
     if "$show_progress_bar"; then
         while true; do
             kill -0 "$ffmpeg_pid" &>/dev/null || break
@@ -946,7 +943,6 @@ for input_video in "${input_videos[@]}"; do
             fi
             sleep "$update_interval"
         done &
-        bg_pids+=( "$!" )
     fi
 
     if "$draw_thumbnails"; then
@@ -955,7 +951,6 @@ for input_video in "${input_videos[@]}"; do
             kill -0 "$ffmpeg_pid" &>/dev/null || break
             draw_thumbnail
         done &
-        bg_pids+=( "$!" )
     fi
 
     # Poll for the cancellation signal.
